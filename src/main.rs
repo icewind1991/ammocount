@@ -5,13 +5,13 @@ use std::env::args;
 use std::fs;
 use std::io::Write;
 use steamid_ng::SteamID;
+use tf_demo_parser::demo::data::UserInfo;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity};
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::packet::datatable::{
     ParseSendTable, SendTableName, ServerClass, ServerClassName,
 };
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
-use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropName, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
@@ -249,15 +249,9 @@ impl AmmoCountAnalyser {
     }
 
     fn parse_user_info(&mut self, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
-        if let (Some(mut data), Some(Ok(entity_id))) = (data, text.map(str::parse::<u32>)) {
-            let _name: String = data
-                .read_sized(32)
-                .unwrap_or_else(|_| "Malformed Name".into());
-            let _user_id: UserId = data.read::<u32>()?.into();
-            let steam_id: String = data.read()?;
-
-            if SteamID::try_from(steam_id.as_str()).ok() == Some(self.local_steam_id) {
-                self.local_player_id = (entity_id + 1).into();
+        if let Some(user_info) = UserInfo::parse_from_string_table(text, data)? {
+            if SteamID::try_from(user_info.steam_id.as_str()).ok() == Some(self.local_steam_id) {
+                self.local_player_id = user_info.entity_id;
             }
         }
 

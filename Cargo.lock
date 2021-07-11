@@ -479,9 +479,9 @@ dependencies = [
 
 [[package]]
 name = "synstructure"
-version = "0.12.4"
+version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b834f2d66f734cb897113e34aaff2f1ab4719ca946f9a7358dba8f8064148701"
+checksum = "474aaa926faa1603c40b7885a9eaea29b444d1cb2850cb7c0e37bb1a4182f4fa"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -491,9 +491,9 @@ dependencies = [
 
 [[package]]
 name = "tf-demo-parser"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2545e5c14cf559dc69f9e9721c5d5839a185f6d8f820330853fcaf0dfd44d21"
+checksum = "6f95f402c09ac6e2691620721aaa0262c2d5c969cd23b48b2f2722af66541600"
 dependencies = [
  "bitbuffer",
  "enumflags2",
