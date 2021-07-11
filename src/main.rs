@@ -55,12 +55,12 @@ fn main() -> Result<(), MainError> {
     let parser =
         DemoParser::new_all_with_analyser(demo.get_stream(), AmmoCountAnalyser::new(steam_id));
     let (header, state) = parser.parse()?;
-    let time_per_tick = header.duration / header.ticks as f32;
+    let time_per_tick = dbg!(header.duration / header.ticks as f32);
     let out_path = format!("{}.txt", path);
     let mut out = fs::File::create(out_path)?;
     // println!("txt = []");
     writeln!(&mut out, "txt = []")?;
-    let mut last_frame = -1;
+    let mut last_frame = 0;
     for (tick, clip, weapon_index) in state
         .into_iter()
         .filter(|(tick, _, _)| *tick >= start && *tick <= end)
@@ -73,16 +73,16 @@ fn main() -> Result<(), MainError> {
         } else {
             0
         };
-        if frame != last_frame {
-            last_frame = frame;
+        for frame in last_frame..frame {
             if clipsize == 0 {
-                println!("txt[{}] = \"\";", frame);
+                // println!("txt[{}] = \"\";", frame);
                 writeln!(&mut out, "txt[{}] = \"\";", frame)?;
             } else {
-                println!("txt[{}] = \"{}/{}\";", frame, clip, clipsize);
+                // println!("txt[{}] = \"{}/{}\";", frame, clip, clipsize);
                 writeln!(&mut out, "txt[{}] = \"{}/{}\";", frame, clip, clipsize)?;
             }
         }
+        last_frame = frame;
     }
     Ok(())
 }
