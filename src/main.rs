@@ -6,12 +6,14 @@ use std::fs;
 use std::io::Write;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::UserInfo;
+use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity};
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::packet::datatable::{
     ParseSendTable, SendTableName, ServerClass, ServerClassName,
 };
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
+use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropName, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
@@ -52,10 +54,12 @@ fn main() -> Result<(), MainError> {
     };
     let file = fs::read(&path)?;
     let demo = Demo::new(&file);
-    let parser =
-        DemoParser::new_all_with_analyser(demo.get_stream(), AmmoCountAnalyser::new(steam_id));
+    let parser = DemoParser::new_all_with_analyser(
+        demo.get_stream(),
+        AmmoCountAnalyser::new(steam_id, [clipsize1, clipsize2]),
+    );
     let (header, state) = parser.parse()?;
-    let time_per_tick = dbg!(header.duration / header.ticks as f32);
+    let time_per_tick = header.duration / header.ticks as f32;
     let out_path = format!("{}.txt", path);
     let mut out = fs::File::create(out_path)?;
     // println!("txt = []");
@@ -90,9 +94,11 @@ fn main() -> Result<(), MainError> {
 pub struct AmmoCountAnalyser {
     clip: Vec<(u32, u16, u8)>,
     current_clip: [u16; 3],
+    max_clip: [u16; 2],
     class_names: Vec<ServerClassName>,
     // indexed by ClassId
     local_player_id: EntityId,
+    local_user_id: UserId,
     local_weapons_ids: [i64; 3],
     outer_map: FnvHashMap<i64, EntityId>,
     active_weapon: i64,
@@ -115,6 +121,9 @@ impl MessageHandler for AmmoCountAnalyser {
                 for entity in &entities.entities {
                     self.handle_entity(tick, entity)
                 }
+            }
+            Message::GameEvent(event_msg) => {
+                self.handle_event(&event_msg.event);
             }
             _ => {}
         }
@@ -170,7 +179,7 @@ const WEAPON2_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapon
 const WEAPON3_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "002");
 
 impl AmmoCountAnalyser {
-    pub fn new(steam_id: SteamID) -> Self {
+    pub fn new(steam_id: SteamID, max_clip: [u16; 2]) -> Self {
         AmmoCountAnalyser {
             clip: Default::default(),
             current_clip: Default::default(),
@@ -183,6 +192,20 @@ impl AmmoCountAnalyser {
             last_tick: 0,
             prop_names: Default::default(),
             local_steam_id: steam_id,
+            max_clip,
+            local_user_id: 0u32.into(),
+        }
+    }
+
+    fn handle_event(&mut self, event: &GameEvent) {
+        match event {
+            GameEvent::PlayerSpawn(spawn) => {
+                if UserId::from(spawn.user_id) == self.local_user_id {
+                    self.current_clip[0] = self.max_clip[0];
+                    self.current_clip[1] = self.max_clip[1];
+                }
+            }
+            _ => {}
         }
     }
 
@@ -252,6 +275,7 @@ impl AmmoCountAnalyser {
         if let Some(user_info) = UserInfo::parse_from_string_table(text, data)? {
             if SteamID::try_from(user_info.steam_id.as_str()).ok() == Some(self.local_steam_id) {
                 self.local_player_id = user_info.entity_id;
+                self.local_user_id = user_info.user_id;
             }
         }
 
