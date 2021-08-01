@@ -62,7 +62,7 @@ fn main() -> Result<(), MainError> {
     let time_per_tick = header.duration / header.ticks as f32;
     let out_path = format!("{}.txt", path);
     let mut out = fs::File::create(out_path)?;
-    // println!("txt = []");
+    println!("txt = []");
     writeln!(&mut out, "txt = []")?;
     let mut last_frame = 0;
     for (tick, clip, weapon_index) in state
@@ -79,10 +79,10 @@ fn main() -> Result<(), MainError> {
         };
         for frame in last_frame..frame {
             if clipsize == 0 {
-                // println!("txt[{}] = \"\";", frame);
+                println!("txt[{}] = \"\";", frame);
                 writeln!(&mut out, "txt[{}] = \"\";", frame)?;
             } else {
-                // println!("txt[{}] = \"{}/{}\";", frame, clip, clipsize);
+                println!("txt[{}] = \"{}/{}\";", frame, clip, clipsize);
                 writeln!(&mut out, "txt[{}] = \"{}/{}\";", frame, clip, clipsize)?;
             }
         }
@@ -151,7 +151,7 @@ impl MessageHandler for AmmoCountAnalyser {
                 // println!("{}.{}", prop_def.owner_table, prop_def.name);
                 self.prop_names.insert(
                     prop_def.identifier(),
-                    (prop_def.owner_table.clone(), prop_def.name.clone()),
+                    (table.name.clone(), prop_def.name.clone()),
                 );
             }
         }
@@ -215,17 +215,17 @@ impl AmmoCountAnalyser {
         }
         self.handle_attribute_container(entity);
 
-        for prop in &entity.props {
+        for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(id) if id != 2097151 => {
                     if entity.entity_index == self.local_player_id {
-                        if prop.index == WEAPON1_ID_PROP {
+                        if prop.identifier == WEAPON1_ID_PROP {
                             self.local_weapons_ids[0] = id;
-                        } else if prop.index == WEAPON2_ID_PROP {
+                        } else if prop.identifier == WEAPON2_ID_PROP {
                             self.local_weapons_ids[1] = id;
-                        } else if prop.index == WEAPON3_ID_PROP {
+                        } else if prop.identifier == WEAPON3_ID_PROP {
                             self.local_weapons_ids[2] = id;
-                        } else if prop.index == ACTIVE_WEAPON_PROP {
+                        } else if prop.identifier == ACTIVE_WEAPON_PROP {
                             self.active_weapon = id;
                         }
                     }
@@ -235,7 +235,7 @@ impl AmmoCountAnalyser {
             for i in 0..3 {
                 if let Some(weapon_entity_id) = self.outer_map.get(&self.local_weapons_ids[i]) {
                     if entity.entity_index == *weapon_entity_id {
-                        if prop.index == CLIP_PROP {
+                        if prop.identifier == CLIP_PROP {
                             if let SendPropValue::Integer(value) = prop.value {
                                 let value = value - 1; //clip size starts from 1
                                 self.current_clip[i] = value as _;
@@ -260,22 +260,30 @@ impl AmmoCountAnalyser {
     }
 
     fn handle_attribute_container(&mut self, entity: &PacketEntity) {
-        for prop in &entity.props {
-            if prop.index == OUTER_CONTAINER_PROP {
+        let mut out = 2097151;
+        for prop in entity.props() {
+            if prop.identifier == OUTER_CONTAINER_PROP {
                 if let SendPropValue::Integer(outer_id) = prop.value {
                     if outer_id != 2097151 {
-                        self.outer_map.insert(outer_id, entity.entity_index);
+                        out = outer_id;
                     }
                 }
+            }
+        }
+        if out != 2097151 {
+            if !self.outer_map.contains_key(&out) {
+                self.outer_map.insert(out, entity.entity_index);
             }
         }
     }
 
     fn parse_user_info(&mut self, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
         if let Some(user_info) = UserInfo::parse_from_string_table(text, data)? {
-            if SteamID::try_from(user_info.steam_id.as_str()).ok() == Some(self.local_steam_id) {
+            if SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
+                == Some(self.local_steam_id)
+            {
                 self.local_player_id = user_info.entity_id;
-                self.local_user_id = user_info.user_id;
+                self.local_user_id = user_info.player_info.user_id.into();
             }
         }
 
