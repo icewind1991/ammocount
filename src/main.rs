@@ -60,17 +60,20 @@ fn main() -> Result<(), MainError> {
     );
     let (header, state) = parser.parse()?;
     let time_per_tick = header.duration / header.ticks as f32;
-    let out_path = format!("{}.txt", path);
-    let mut out = fs::File::create(out_path)?;
+    let ammo_path = format!("{}_ammo.txt", path);
+    let health_path = format!("{}_health.txt", path);
+    let mut ammo_out = fs::File::create(ammo_path)?;
+    let mut health_out = fs::File::create(health_path)?;
     println!("txt = []");
-    writeln!(&mut out, "txt = []")?;
+    writeln!(&mut ammo_out, "txt = []")?;
+    writeln!(&mut health_out, "txt = []")?;
     let mut last_frame = 0;
-    for (tick, clip, weapon_index) in state
+    for (tick, clip, weapon_index, health) in state
         .into_iter()
-        .filter(|(tick, _, _)| *tick >= start && *tick <= end)
+        .filter(|(tick, _, _, _)| *tick >= start && *tick <= end)
     {
         let frame = ((tick - start) as f32 * time_per_tick * 60.0) as i32;
-        let clipsize = if weapon_index == 0 {
+        let clip_size = if weapon_index == 0 {
             clipsize1
         } else if weapon_index == 1 {
             clipsize2
@@ -78,13 +81,18 @@ fn main() -> Result<(), MainError> {
             0
         };
         for frame in last_frame..frame {
-            if clipsize == 0 {
+            if clip_size == 0 {
                 println!("txt[{}] = \"\";", frame);
-                writeln!(&mut out, "txt[{}] = \"\";", frame)?;
+                writeln!(&mut ammo_out, "txt[{}] = \"\";", frame)?;
             } else {
-                println!("txt[{}] = \"{}/{}\";", frame, clip, clipsize);
-                writeln!(&mut out, "txt[{}] = \"{}/{}\";", frame, clip, clipsize)?;
+                println!("txt[{}] = \"{}/{}\";", frame, clip, clip_size);
+                writeln!(
+                    &mut ammo_out,
+                    "txt[{}] = \"{}/{}\";",
+                    frame, clip, clip_size
+                )?;
             }
+            writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
         }
         last_frame = frame;
     }
@@ -92,9 +100,10 @@ fn main() -> Result<(), MainError> {
 }
 
 pub struct AmmoCountAnalyser {
-    clip: Vec<(u32, u16, u8)>,
+    output: Vec<(u32, u16, u8, u16)>,
     current_clip: [u16; 3],
     max_clip: [u16; 2],
+    current_health: u16,
     class_names: Vec<ServerClassName>,
     // indexed by ClassId
     local_player_id: EntityId,
@@ -109,7 +118,7 @@ pub struct AmmoCountAnalyser {
 }
 
 impl MessageHandler for AmmoCountAnalyser {
-    type Output = Vec<(u32, u16, u8)>;
+    type Output = Vec<(u32, u16, u8, u16)>;
 
     fn does_handle(_message_type: MessageType) -> bool {
         true
@@ -164,7 +173,7 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn into_output(self, _state: &ParserState) -> Self::Output {
-        self.clip
+        self.output
     }
 }
 
@@ -173,6 +182,11 @@ const OUTER_CONTAINER_PROP: SendPropIdentifier =
     SendPropIdentifier::new("DT_AttributeContainer", "m_hOuter");
 const ACTIVE_WEAPON_PROP: SendPropIdentifier =
     SendPropIdentifier::new("DT_BaseCombatCharacter", "m_hActiveWeapon");
+const HEALTH_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BasePlayer", "m_iHealth");
+const UBER_CHARGE_PROP: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFWeaponMedigunDataNonLocal", "m_flChargeLevel");
+const UBER_CHARGE_PROP_LOCAL: SendPropIdentifier =
+    SendPropIdentifier::new("DT_LocalTFWeaponMedigunData", "m_flChargeLevel");
 
 const WEAPON1_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "000");
 const WEAPON2_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "001");
@@ -181,7 +195,7 @@ const WEAPON3_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapon
 impl AmmoCountAnalyser {
     pub fn new(steam_id: SteamID, max_clip: [u16; 2]) -> Self {
         AmmoCountAnalyser {
-            clip: Default::default(),
+            output: Default::default(),
             current_clip: Default::default(),
             class_names: Default::default(),
             local_player_id: Default::default(),
@@ -194,6 +208,7 @@ impl AmmoCountAnalyser {
             local_steam_id: steam_id,
             max_clip,
             local_user_id: 0u32.into(),
+            current_health: 0,
         }
     }
 
@@ -227,6 +242,8 @@ impl AmmoCountAnalyser {
                             self.local_weapons_ids[2] = id;
                         } else if prop.identifier == ACTIVE_WEAPON_PROP {
                             self.active_weapon = id;
+                        } else if prop.identifier == HEALTH_PROP {
+                            self.current_health = id as u16;
                         }
                     }
                 }
@@ -251,8 +268,12 @@ impl AmmoCountAnalyser {
         if tick != self.last_tick && tick > self.start_tick {
             for i in 0..3 {
                 if self.local_weapons_ids[i] == self.active_weapon {
-                    self.clip
-                        .push((tick - self.start_tick, self.current_clip[i], i as u8));
+                    self.output.push((
+                        tick - self.start_tick,
+                        self.current_clip[i],
+                        i as u8,
+                        self.current_health,
+                    ));
                 }
             }
             self.last_tick = tick;
