@@ -1,10 +1,8 @@
 use fnv::FnvHashMap;
 use main_error::MainError;
-use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
 use std::io::Write;
-use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::UserInfo;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity};
@@ -22,12 +20,12 @@ use tf_demo_parser::{DemoParser, ReadResult, Stream};
 fn main() -> Result<(), MainError> {
     let mut args = args();
     let bin = args.next().unwrap();
-    let (path, steam_id, start, end) = if let (Some(path), Some(steam_id), Some(start), Some(end)) =
+    let (path, user, start, end) = if let (Some(path), Some(user), Some(start), Some(end)) =
         (args.next(), args.next(), args.next(), args.next())
     {
         (
             path,
-            SteamID::try_from(steam_id.as_str()).expect("invalid steam id"),
+            user,
             start.parse().expect("invalid start tick"),
             end.parse().expect("invalid end tick"),
         )
@@ -37,8 +35,7 @@ fn main() -> Result<(), MainError> {
     };
     let file = fs::read(&path)?;
     let demo = Demo::new(&file);
-    let parser =
-        DemoParser::new_all_with_analyser(demo.get_stream(), AmmoCountAnalyser::new(steam_id));
+    let parser = DemoParser::new_all_with_analyser(demo.get_stream(), AmmoCountAnalyser::new(user));
     let (header, state) = parser.parse()?;
     let time_per_tick = header.duration / header.ticks as f32;
     let ammo_path = format!("{}_ammo.txt", path);
@@ -77,7 +74,7 @@ pub struct AmmoCountAnalyser {
     start_tick: u32,
     last_tick: u32,
     prop_names: FnvHashMap<SendPropIdentifier, (SendTableName, SendPropName)>,
-    local_steam_id: SteamID,
+    target_user_name: String,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -163,7 +160,7 @@ const WEAPON3_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapon
 const OUTER_NULL: i64 = 0x1FFFFF;
 
 impl AmmoCountAnalyser {
-    pub fn new(steam_id: SteamID) -> Self {
+    pub fn new(target_user_name: String) -> Self {
         AmmoCountAnalyser {
             output: Default::default(),
             class_names: Default::default(),
@@ -173,7 +170,7 @@ impl AmmoCountAnalyser {
             start_tick: 0,
             last_tick: 0,
             prop_names: Default::default(),
-            local_steam_id: steam_id,
+            target_user_name,
             max_clip: Default::default(),
             clip: Default::default(),
             local_user_id: 0u32.into(),
@@ -250,8 +247,11 @@ impl AmmoCountAnalyser {
 
     fn parse_user_info(&mut self, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
         if let Some(user_info) = UserInfo::parse_from_string_table(text, data)? {
-            if SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
-                == Some(self.local_steam_id)
+            if user_info
+                .player_info
+                .name
+                .to_ascii_lowercase()
+                .contains(&self.target_user_name)
             {
                 self.local_player_id = user_info.entity_id;
                 self.local_user_id = user_info.player_info.user_id.into();
