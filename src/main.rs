@@ -54,9 +54,15 @@ fn main() -> Result<(), MainError> {
     {
         let frame = ((tick - start) as f32 * time_per_tick * 60.0) as i32;
         for frame in last_frame..frame {
-            println!("txt[{}] = \"{}/{}\";", frame, clip, max_clip);
-            writeln!(&mut ammo_out, "txt[{}] = \"{}/{}\";", frame, clip, max_clip)?;
-            writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
+            if max_clip > 0 {
+                println!("txt[{}] = \"{}/{}\";", frame, clip, max_clip);
+                writeln!(&mut ammo_out, "txt[{}] = \"{}/{}\";", frame, clip, max_clip)?;
+                writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
+            } else {
+                println!("txt[{}] = \"{}\";", frame, clip);
+                writeln!(&mut ammo_out, "txt[{}] = \"{}\";", frame, clip)?;
+                writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
+            }
         }
         last_frame = frame;
     }
@@ -69,6 +75,7 @@ pub struct AmmoCountAnalyser {
     clip: FnvHashMap<EntityId, u16>,
     current_health: u16,
     class_names: Vec<ServerClassName>,
+    entity_classes: FnvHashMap<EntityId, ClassId>,
     local_player_id: EntityId,
     local_user_id: UserId,
     outer_map: FnvHashMap<i64, EntityId>,
@@ -77,6 +84,7 @@ pub struct AmmoCountAnalyser {
     last_tick: u32,
     prop_names: FnvHashMap<SendPropIdentifier, (SendTableName, SendPropName)>,
     target_user_name: String,
+    ammo: [u16; 2],
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -159,6 +167,11 @@ const WEAPON2_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapon
 #[allow(dead_code)]
 const WEAPON3_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "002");
 
+#[allow(dead_code)]
+const AMMO1_PROP: SendPropIdentifier = SendPropIdentifier::new("m_iAmmo", "001");
+#[allow(dead_code)]
+const AMMO2_PROP: SendPropIdentifier = SendPropIdentifier::new("m_iAmmo", "002");
+
 const OUTER_NULL: i64 = 0x1FFFFF;
 
 impl AmmoCountAnalyser {
@@ -166,6 +179,7 @@ impl AmmoCountAnalyser {
         AmmoCountAnalyser {
             output: Default::default(),
             class_names: Default::default(),
+            entity_classes: Default::default(),
             local_player_id: Default::default(),
             outer_map: Default::default(),
             active_weapon: 0,
@@ -173,6 +187,7 @@ impl AmmoCountAnalyser {
             last_tick: 0,
             prop_names: Default::default(),
             target_user_name: target_user_name.to_ascii_lowercase(),
+            ammo: [0; 2],
             max_clip: Default::default(),
             clip: Default::default(),
             local_user_id: 0u32.into(),
@@ -183,6 +198,11 @@ impl AmmoCountAnalyser {
     #[allow(dead_code)]
     fn server_class(&self, id: ClassId) -> &str {
         self.class_names[u16::from(id) as usize].as_str()
+    }
+
+    #[allow(dead_code)]
+    fn entity_class(&self, id: EntityId) -> &str {
+        self.server_class(self.entity_classes[&id])
     }
 
     #[allow(dead_code)]
@@ -206,12 +226,20 @@ impl AmmoCountAnalyser {
         if self.start_tick == 0 {
             self.start_tick = tick;
         }
+        self.entity_classes
+            .insert(entity.entity_index, entity.server_class);
 
         for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => match prop.identifier {
                     ACTIVE_WEAPON_PROP if entity.entity_index == self.local_player_id => {
                         self.active_weapon = value;
+                    }
+                    AMMO1_PROP if entity.entity_index == self.local_player_id => {
+                        self.ammo[0] = value as u16;
+                    }
+                    AMMO2_PROP if entity.entity_index == self.local_player_id => {
+                        self.ammo[1] = value as u16;
                     }
                     HEALTH_PROP if entity.entity_index == self.local_player_id => {
                         self.current_health = value as u16;
@@ -235,9 +263,14 @@ impl AmmoCountAnalyser {
         if tick != self.last_tick && tick > self.start_tick {
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
                 if self.clip.contains_key(active_weapon) {
+                    let clip = if self.max_clip[active_weapon] > 0 {
+                        self.clip[active_weapon].saturating_sub(1)
+                    } else {
+                        self.ammo[0]
+                    };
                     self.output.push((
                         tick - self.start_tick,
-                        self.clip[active_weapon].saturating_sub(1),
+                        clip,
                         self.max_clip[active_weapon].saturating_sub(1),
                         self.current_health,
                     ));
