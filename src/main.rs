@@ -4,6 +4,7 @@ use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
 use std::io::Write;
+use std::str::FromStr;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::UserInfo;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
@@ -42,27 +43,36 @@ fn main() -> Result<(), MainError> {
     let time_per_tick = header.duration / header.ticks as f32;
     let ammo_path = format!("{}_ammo.txt", path);
     let health_path = format!("{}_health.txt", path);
+    let uber_path = format!("{}_uber.txt", path);
     let mut ammo_out = fs::File::create(ammo_path)?;
     let mut health_out = fs::File::create(health_path)?;
+    let mut uber_out = None;
     println!("txt = []");
     writeln!(&mut ammo_out, "txt = []")?;
     writeln!(&mut health_out, "txt = []")?;
     let mut last_frame = 0;
-    for (tick, clip, max_clip, health) in state
+    for (tick, clip, max_clip, health, uber) in state
         .into_iter()
-        .filter(|(tick, _, _, _)| *tick >= start && *tick <= end)
+        .filter(|(tick, _, _, _, _)| *tick >= start && *tick <= end)
     {
         let frame = ((tick - start) as f32 * time_per_tick * 60.0) as i32;
         for frame in last_frame..frame {
+            if let Some(uber) = uber {
+                let uber_out = uber_out.get_or_insert_with(|| {
+                    let mut uber_out = fs::File::create(&uber_path).unwrap();
+                    writeln!(&mut uber_out, "txt = []").unwrap();
+                    uber_out
+                });
+                writeln!(uber_out, "txt[{}] = \"{}\";", frame, uber)?;
+            }
             if max_clip > 0 {
                 println!("txt[{}] = \"{}/{}\";", frame, clip, max_clip);
                 writeln!(&mut ammo_out, "txt[{}] = \"{}/{}\";", frame, clip, max_clip)?;
-                writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
             } else {
                 println!("txt[{}] = \"{}\";", frame, clip);
                 writeln!(&mut ammo_out, "txt[{}] = \"{}\";", frame, clip)?;
-                writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
             }
+            writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
         }
         last_frame = frame;
     }
@@ -70,7 +80,7 @@ fn main() -> Result<(), MainError> {
 }
 
 pub struct AmmoCountAnalyser {
-    output: Vec<(u32, u16, u16, u16)>,
+    output: Vec<(u32, u16, u16, u16, Option<f32>)>,
     max_clip: FnvHashMap<EntityId, u16>,
     clip: FnvHashMap<EntityId, u16>,
     current_health: u16,
@@ -85,10 +95,12 @@ pub struct AmmoCountAnalyser {
     prop_names: FnvHashMap<SendPropIdentifier, (SendTableName, SendPropName)>,
     target_user_name: String,
     ammo: [u16; 2],
+    uber: f32,
+    has_uber: bool,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
-    type Output = Vec<(u32, u16, u16, u16)>;
+    type Output = Vec<(u32, u16, u16, u16, Option<f32>)>;
 
     fn does_handle(_message_type: MessageType) -> bool {
         true
@@ -192,6 +204,8 @@ impl AmmoCountAnalyser {
             clip: Default::default(),
             local_user_id: 0u32.into(),
             current_health: 0,
+            uber: 0.0,
+            has_uber: false,
         }
     }
 
@@ -231,31 +245,43 @@ impl AmmoCountAnalyser {
 
         for prop in entity.props() {
             match prop.value {
-                SendPropValue::Integer(value) if value != OUTER_NULL => match prop.identifier {
-                    ACTIVE_WEAPON_PROP if entity.entity_index == self.local_player_id => {
-                        self.active_weapon = value;
-                    }
-                    AMMO1_PROP if entity.entity_index == self.local_player_id => {
-                        self.ammo[0] = value as u16;
-                    }
-                    AMMO2_PROP if entity.entity_index == self.local_player_id => {
-                        self.ammo[1] = value as u16;
-                    }
-                    HEALTH_PROP if entity.entity_index == self.local_player_id => {
-                        self.current_health = value as u16;
-                    }
-                    OUTER_CONTAINER_PROP => {
-                        if !self.outer_map.contains_key(&value) {
-                            self.outer_map.insert(value, entity.entity_index);
+                SendPropValue::Integer(value) if value != OUTER_NULL => {
+                    let (table, prop_name) = self.prop_names.get(&prop.identifier).unwrap();
+                    if table.as_str() == "m_iChargeLevel" {
+                        let entity_id = u32::from_str(prop_name.as_str()).unwrap();
+                        if EntityId::from(entity_id) == self.local_player_id {
+                            if value > 0 {
+                                self.has_uber = true;
+                            }
+                            self.uber = value as f32;
                         }
                     }
-                    CLIP_PROP => {
-                        let clip_max = self.max_clip.entry(entity.entity_index).or_default();
-                        *clip_max = (*clip_max).max(value as u16);
-                        self.clip.insert(entity.entity_index, value as u16);
+                    match prop.identifier {
+                        ACTIVE_WEAPON_PROP if entity.entity_index == self.local_player_id => {
+                            self.active_weapon = value;
+                        }
+                        AMMO1_PROP if entity.entity_index == self.local_player_id => {
+                            self.ammo[0] = value as u16;
+                        }
+                        AMMO2_PROP if entity.entity_index == self.local_player_id => {
+                            self.ammo[1] = value as u16;
+                        }
+                        HEALTH_PROP if entity.entity_index == self.local_player_id => {
+                            self.current_health = value as u16;
+                        }
+                        OUTER_CONTAINER_PROP => {
+                            if !self.outer_map.contains_key(&value) {
+                                self.outer_map.insert(value, entity.entity_index);
+                            }
+                        }
+                        CLIP_PROP => {
+                            let clip_max = self.max_clip.entry(entity.entity_index).or_default();
+                            *clip_max = (*clip_max).max(value as u16);
+                            self.clip.insert(entity.entity_index, value as u16);
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         }
@@ -273,6 +299,7 @@ impl AmmoCountAnalyser {
                         clip,
                         self.max_clip[active_weapon].saturating_sub(1),
                         self.current_health,
+                        self.has_uber.then(|| self.uber),
                     ));
                 }
             }
@@ -290,6 +317,7 @@ impl AmmoCountAnalyser {
                 || SteamID::try_from(self.target_user_name.as_str()).ok()
                     == SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
             {
+                // dbg!(&user_info.player_info);
                 self.local_player_id = user_info.entity_id;
                 self.local_user_id = user_info.player_info.user_id.into();
             }
