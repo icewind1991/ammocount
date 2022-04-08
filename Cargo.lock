@@ -18,6 +18,7 @@ dependencies = [
  "fnv",
  "main_error",
  "once_cell",
+ "steamid-ng",
  "tf-demo-parser",
 ]
 

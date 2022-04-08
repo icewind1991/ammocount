@@ -1,8 +1,10 @@
 use fnv::FnvHashMap;
 use main_error::MainError;
+use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
 use std::io::Write;
+use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::UserInfo;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity};
@@ -170,7 +172,7 @@ impl AmmoCountAnalyser {
             start_tick: 0,
             last_tick: 0,
             prop_names: Default::default(),
-            target_user_name,
+            target_user_name: target_user_name.to_ascii_lowercase(),
             max_clip: Default::default(),
             clip: Default::default(),
             local_user_id: 0u32.into(),
@@ -252,6 +254,8 @@ impl AmmoCountAnalyser {
                 .name
                 .to_ascii_lowercase()
                 .contains(&self.target_user_name)
+                || SteamID::try_from(self.target_user_name.as_str()).ok()
+                    == SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
             {
                 self.local_player_id = user_info.entity_id;
                 self.local_user_id = user_info.player_info.user_id.into();
