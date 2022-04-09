@@ -13,6 +13,7 @@ use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::packet::datatable::{
     ClassId, ParseSendTable, ServerClass, ServerClassName,
 };
+use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
@@ -91,6 +92,7 @@ pub struct TickData {
 
 #[derive(Default)]
 pub struct AmmoCountAnalyser {
+    tick: u32,
     output: Vec<TickData>,
     max_clip: FnvHashMap<EntityId, u16>,
     clip: FnvHashMap<EntityId, u16>,
@@ -101,7 +103,6 @@ pub struct AmmoCountAnalyser {
     local_user_id: UserId,
     outer_map: FnvHashMap<i64, EntityId>,
     active_weapon: i64,
-    start_tick: u32,
     last_tick: u32,
     target_user_name: String,
     ammo: [u16; 2],
@@ -153,6 +154,10 @@ impl MessageHandler for AmmoCountAnalyser {
             .map(|class| &class.name)
             .cloned()
             .collect();
+    }
+
+    fn handle_packet_meta(&mut self, tick: u32, _meta: &MessagePacketMeta) {
+        self.tick = tick;
     }
 
     fn into_output(self, _state: &ParserState) -> Self::Output {
@@ -216,17 +221,14 @@ impl AmmoCountAnalyser {
         }
     }
 
-    fn handle_entity(&mut self, tick: u32, entity: &PacketEntity) {
-        if self.start_tick == 0 {
-            self.start_tick = tick;
-        }
+    fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity) {
         self.entity_classes
             .insert(entity.entity_index, entity.server_class);
 
         for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
-                    if prop.identifier.table_name().unwrap() == "m_iChargeLevel" {
+                    if prop.identifier.table_name() == Some("m_iChargeLevel".into()) {
                         let entity_id =
                             u32::from_str(prop.identifier.prop_name().unwrap().as_str()).unwrap();
                         if EntityId::from(entity_id) == self.local_player_id {
@@ -272,7 +274,7 @@ impl AmmoCountAnalyser {
             }
         }
 
-        if tick != self.last_tick && tick > self.start_tick {
+        if self.tick > self.last_tick {
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
                 if self.clip.contains_key(active_weapon) {
                     let ammo = if self.max_clip[active_weapon] > 0 {
@@ -286,7 +288,7 @@ impl AmmoCountAnalyser {
                         self.max_ammo[0]
                     };
                     self.output.push(TickData {
-                        tick: tick - self.start_tick,
+                        tick: self.tick,
                         ammo,
                         max_ammo,
                         health: self.current_health,
@@ -294,7 +296,7 @@ impl AmmoCountAnalyser {
                     });
                 } else {
                     warn!(
-                        tick = tick - self.start_tick,
+                        tick = self.tick,
                         weapon_handle = self.active_weapon,
                         weapon_id = display(active_weapon),
                         "can't find clip"
@@ -302,12 +304,12 @@ impl AmmoCountAnalyser {
                 }
             } else {
                 warn!(
-                    tick = tick - self.start_tick,
+                    tick = self.tick,
                     weapon_handle = self.active_weapon,
                     "can't find weapon"
                 );
             }
-            self.last_tick = tick;
+            self.last_tick = self.tick;
         }
     }
 
