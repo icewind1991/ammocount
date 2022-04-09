@@ -19,9 +19,11 @@ use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropName, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
 use tf_demo_parser::{DemoParser, ReadResult, Stream};
+use tracing::warn;
 
 fn main() -> Result<(), MainError> {
     let mut args = args();
+    // tracing_subscriber::fmt::init();
     let bin = args.next().unwrap();
     let (path, user, start, end) = if let (Some(path), Some(user), Some(start), Some(end)) =
         (args.next(), args.next(), args.next(), args.next())
@@ -307,7 +309,20 @@ impl AmmoCountAnalyser {
                         health: self.current_health,
                         uber: self.has_uber.then(|| self.uber),
                     });
+                } else {
+                    warn!(
+                        tick = tick - self.start_tick,
+                        weapon_handle = self.active_weapon,
+                        weapon_id = display(active_weapon),
+                        "can't find clip"
+                    );
                 }
+            } else {
+                warn!(
+                    tick = tick - self.start_tick,
+                    weapon_handle = self.active_weapon,
+                    "can't find weapon"
+                );
             }
             self.last_tick = tick;
         }
@@ -323,7 +338,6 @@ impl AmmoCountAnalyser {
                 || SteamID::try_from(self.target_user_name.as_str()).ok()
                     == SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
             {
-                // dbg!(&user_info.player_info);
                 self.local_player_id = user_info.entity_id;
                 self.local_user_id = user_info.player_info.user_id.into();
             }

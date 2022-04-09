@@ -20,6 +20,8 @@ dependencies = [
  "once_cell",
  "steamid-ng",
  "tf-demo-parser",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -544,7 +546,7 @@ dependencies = [
 [[package]]
 name = "tf-demo-parser"
 version = "0.4.0"
-source = "git+https://github.com/demostf/parser#2e8d77fb0adc6803591f4f709cb6f8fdcfa85f19"
+source = "git+https://github.com/demostf/parser#e78c1f86082d5f83403155938584b0c90fc2fa50"
 dependencies = [
  "bitbuffer",
  "enumflags2",
@@ -603,9 +605,9 @@ dependencies = [
 
 [[package]]
 name = "tracing"
-version = "0.1.26"
+version = "0.1.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09adeb8c97449311ccd28a427f96fb563e7fd31aabf994189879d9da2394b89d"
+checksum = "4a1bdf54a7c28a2bbf701e1d2233f6c77f473486b94bee4f9678da5a148dca7f"
 dependencies = [
  "cfg-if",
  "pin-project-lite",
@@ -615,9 +617,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.15"
+version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42e6fa53307c8a17e4ccd4dc81cf5ec38db9209f59b222210375b54ee40d1e2"
+checksum = "2e65ce065b4b5c53e73bb28912318cb8c9e9ad3921f1d669eb0e68b4c8143a2b"
 dependencies = [
  "proc-macro2",
  "quote",
