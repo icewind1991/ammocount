@@ -11,12 +11,12 @@ use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity};
 use tf_demo_parser::demo::message::Message;
 use tf_demo_parser::demo::packet::datatable::{
-    ClassId, ParseSendTable, SendTableName, ServerClass, ServerClassName,
+    ClassId, ParseSendTable, ServerClass, ServerClassName,
 };
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
-use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropName, SendPropValue};
+use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
 use tf_demo_parser::{DemoParser, ReadResult, Stream};
 use tracing::warn;
@@ -103,7 +103,6 @@ pub struct AmmoCountAnalyser {
     active_weapon: i64,
     start_tick: u32,
     last_tick: u32,
-    prop_names: FnvHashMap<SendPropIdentifier, (SendTableName, SendPropName)>,
     target_user_name: String,
     ammo: [u16; 2],
     max_ammo: [u16; 2],
@@ -146,19 +145,9 @@ impl MessageHandler for AmmoCountAnalyser {
 
     fn handle_data_tables(
         &mut self,
-        parse_tables: &[ParseSendTable],
+        _parse_tables: &[ParseSendTable],
         server_classes: &[ServerClass],
     ) {
-        for table in parse_tables {
-            for prop_def in &table.props {
-                // println!("{}.{}", prop_def.owner_table, prop_def.name);
-                self.prop_names.insert(
-                    prop_def.identifier(),
-                    (table.name.clone(), prop_def.name.clone()),
-                );
-            }
-        }
-
         self.class_names = server_classes
             .iter()
             .map(|class| &class.name)
@@ -216,12 +205,6 @@ impl AmmoCountAnalyser {
         self.server_class(self.entity_classes[&id])
     }
 
-    #[allow(dead_code)]
-    fn prop_name(&self, id: SendPropIdentifier) -> String {
-        let (t, n) = self.prop_names.get(&id).unwrap();
-        format!("{}.{}", t, n)
-    }
-
     fn handle_event(&mut self, event: &GameEvent) {
         match event {
             GameEvent::PlayerSpawn(spawn) => {
@@ -243,9 +226,9 @@ impl AmmoCountAnalyser {
         for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
-                    let (table, prop_name) = self.prop_names.get(&prop.identifier).unwrap();
-                    if table.as_str() == "m_iChargeLevel" {
-                        let entity_id = u32::from_str(prop_name.as_str()).unwrap();
+                    if prop.identifier.table_name().unwrap() == "m_iChargeLevel" {
+                        let entity_id =
+                            u32::from_str(prop.identifier.prop_name().unwrap().as_str()).unwrap();
                         if EntityId::from(entity_id) == self.local_player_id {
                             if value > 0 {
                                 self.has_uber = true;
@@ -339,7 +322,7 @@ impl AmmoCountAnalyser {
                     == SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
             {
                 self.local_player_id = user_info.entity_id;
-                self.local_user_id = user_info.player_info.user_id.into();
+                self.local_user_id = user_info.player_info.user_id;
             }
         }
 
