@@ -544,7 +544,7 @@ dependencies = [
 [[package]]
 name = "tf-demo-parser"
 version = "0.4.0"
-source = "git+https://github.com/demostf/parser#5a0375c9c06fcd30a66f898caf824a1becfce3b0"
+source = "git+https://github.com/demostf/parser#2e8d77fb0adc6803591f4f709cb6f8fdcfa85f19"
 dependencies = [
  "bitbuffer",
  "enumflags2",

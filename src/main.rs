@@ -51,13 +51,13 @@ fn main() -> Result<(), MainError> {
     writeln!(&mut ammo_out, "txt = []")?;
     writeln!(&mut health_out, "txt = []")?;
     let mut last_frame = 0;
-    for (tick, clip, max_clip, health, uber) in state
+    for data in state
         .into_iter()
-        .filter(|(tick, _, _, _, _)| *tick >= start && *tick <= end)
+        .filter(|data| data.tick >= start && data.tick <= end)
     {
-        let frame = ((tick - start) as f32 * time_per_tick * 60.0) as i32;
+        let frame = ((data.tick - start) as f32 * time_per_tick * 60.0) as i32;
         for frame in last_frame..frame {
-            if let Some(uber) = uber {
+            if let Some(uber) = data.uber {
                 let uber_out = uber_out.get_or_insert_with(|| {
                     let mut uber_out = fs::File::create(&uber_path).unwrap();
                     writeln!(&mut uber_out, "txt = []").unwrap();
@@ -65,22 +65,31 @@ fn main() -> Result<(), MainError> {
                 });
                 writeln!(uber_out, "txt[{}] = \"{}\";", frame, uber)?;
             }
-            if max_clip > 0 {
-                println!("txt[{}] = \"{}/{}\";", frame, clip, max_clip);
-                writeln!(&mut ammo_out, "txt[{}] = \"{}/{}\";", frame, clip, max_clip)?;
-            } else {
-                println!("txt[{}] = \"{}\";", frame, clip);
-                writeln!(&mut ammo_out, "txt[{}] = \"{}\";", frame, clip)?;
-            }
-            writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, health)?;
+            println!("txt[{}] = \"{}/{}\";", frame, data.ammo, data.max_ammo);
+            writeln!(
+                &mut ammo_out,
+                "txt[{}] = \"{}/{}\";",
+                frame, data.ammo, data.max_ammo
+            )?;
+            writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, data.health)?;
         }
         last_frame = frame;
     }
     Ok(())
 }
 
+#[derive(Default)]
+pub struct TickData {
+    tick: u32,
+    ammo: u16,
+    max_ammo: u16,
+    health: u16,
+    uber: Option<u8>,
+}
+
+#[derive(Default)]
 pub struct AmmoCountAnalyser {
-    output: Vec<(u32, u16, u16, u16, Option<f32>)>,
+    output: Vec<TickData>,
     max_clip: FnvHashMap<EntityId, u16>,
     clip: FnvHashMap<EntityId, u16>,
     current_health: u16,
@@ -95,12 +104,13 @@ pub struct AmmoCountAnalyser {
     prop_names: FnvHashMap<SendPropIdentifier, (SendTableName, SendPropName)>,
     target_user_name: String,
     ammo: [u16; 2],
-    uber: f32,
+    max_ammo: [u16; 2],
+    uber: u8,
     has_uber: bool,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
-    type Output = Vec<(u32, u16, u16, u16, Option<f32>)>;
+    type Output = Vec<TickData>;
 
     fn does_handle(_message_type: MessageType) -> bool {
         true
@@ -189,23 +199,8 @@ const OUTER_NULL: i64 = 0x1FFFFF;
 impl AmmoCountAnalyser {
     pub fn new(target_user_name: String) -> Self {
         AmmoCountAnalyser {
-            output: Default::default(),
-            class_names: Default::default(),
-            entity_classes: Default::default(),
-            local_player_id: Default::default(),
-            outer_map: Default::default(),
-            active_weapon: 0,
-            start_tick: 0,
-            last_tick: 0,
-            prop_names: Default::default(),
             target_user_name: target_user_name.to_ascii_lowercase(),
-            ammo: [0; 2],
-            max_clip: Default::default(),
-            clip: Default::default(),
-            local_user_id: 0u32.into(),
-            current_health: 0,
-            uber: 0.0,
-            has_uber: false,
+            ..Default::default()
         }
     }
 
@@ -253,7 +248,7 @@ impl AmmoCountAnalyser {
                             if value > 0 {
                                 self.has_uber = true;
                             }
-                            self.uber = value as f32;
+                            self.uber = value as u8;
                         }
                     }
                     match prop.identifier {
@@ -262,9 +257,15 @@ impl AmmoCountAnalyser {
                         }
                         AMMO1_PROP if entity.entity_index == self.local_player_id => {
                             self.ammo[0] = value as u16;
+                            if self.ammo[0] > self.max_ammo[0] {
+                                self.max_ammo[0] = self.ammo[0];
+                            }
                         }
                         AMMO2_PROP if entity.entity_index == self.local_player_id => {
                             self.ammo[1] = value as u16;
+                            if self.ammo[1] > self.max_ammo[1] {
+                                self.max_ammo[1] = self.ammo[1];
+                            }
                         }
                         HEALTH_PROP if entity.entity_index == self.local_player_id => {
                             self.current_health = value as u16;
@@ -289,18 +290,23 @@ impl AmmoCountAnalyser {
         if tick != self.last_tick && tick > self.start_tick {
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
                 if self.clip.contains_key(active_weapon) {
-                    let clip = if self.max_clip[active_weapon] > 0 {
+                    let ammo = if self.max_clip[active_weapon] > 0 {
                         self.clip[active_weapon].saturating_sub(1)
                     } else {
                         self.ammo[0]
                     };
-                    self.output.push((
-                        tick - self.start_tick,
-                        clip,
-                        self.max_clip[active_weapon].saturating_sub(1),
-                        self.current_health,
-                        self.has_uber.then(|| self.uber),
-                    ));
+                    let max_ammo = if self.max_clip[active_weapon] > 0 {
+                        self.max_clip[active_weapon].saturating_sub(1)
+                    } else {
+                        self.max_ammo[0]
+                    };
+                    self.output.push(TickData {
+                        tick: tick - self.start_tick,
+                        ammo,
+                        max_ammo,
+                        health: self.current_health,
+                        uber: self.has_uber.then(|| self.uber),
+                    });
                 }
             }
             self.last_tick = tick;
