@@ -4,7 +4,6 @@ use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
 use std::io::Write;
-use std::str::FromStr;
 use steamid_ng::SteamID;
 use tf_demo_parser::demo::data::UserInfo;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
@@ -98,7 +97,6 @@ pub struct AmmoCountAnalyser {
     clip: FnvHashMap<EntityId, u16>,
     current_health: u16,
     class_names: Vec<ServerClassName>,
-    entity_classes: FnvHashMap<EntityId, ClassId>,
     local_player_id: EntityId,
     local_user_id: UserId,
     outer_map: FnvHashMap<i64, EntityId>,
@@ -205,11 +203,6 @@ impl AmmoCountAnalyser {
         self.class_names[u16::from(id) as usize].as_str()
     }
 
-    #[allow(dead_code)]
-    fn entity_class(&self, id: EntityId) -> &str {
-        self.server_class(self.entity_classes[&id])
-    }
-
     fn handle_event(&mut self, event: &GameEvent) {
         match event {
             GameEvent::PlayerSpawn(spawn) => {
@@ -222,20 +215,18 @@ impl AmmoCountAnalyser {
     }
 
     fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity) {
-        self.entity_classes
-            .insert(entity.entity_index, entity.server_class);
-
         for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
-                    if prop.identifier.table_name() == Some("m_iChargeLevel".into()) {
-                        let entity_id =
-                            u32::from_str(prop.identifier.prop_name().unwrap().as_str()).unwrap();
-                        if EntityId::from(entity_id) == self.local_player_id {
-                            if value > 0 {
-                                self.has_uber = true;
+                    if let Some((table_name, prop_name)) = prop.identifier.names() {
+                        if table_name == "m_iChargeLevel" {
+                            let entity_id: u32 = prop_name.parse().unwrap();
+                            if EntityId::from(entity_id) == self.local_player_id {
+                                if value > 0 {
+                                    self.has_uber = true;
+                                }
+                                self.uber = value as u8;
                             }
-                            self.uber = value as u8;
                         }
                     }
                     match prop.identifier {
@@ -244,23 +235,17 @@ impl AmmoCountAnalyser {
                         }
                         AMMO1_PROP if entity.entity_index == self.local_player_id => {
                             self.ammo[0] = value as u16;
-                            if self.ammo[0] > self.max_ammo[0] {
-                                self.max_ammo[0] = self.ammo[0];
-                            }
+                            self.max_ammo[0] = self.max_ammo[0].max(value as u16);
                         }
                         AMMO2_PROP if entity.entity_index == self.local_player_id => {
                             self.ammo[1] = value as u16;
-                            if self.ammo[1] > self.max_ammo[1] {
-                                self.max_ammo[1] = self.ammo[1];
-                            }
+                            self.max_ammo[1] = self.max_ammo[1].max(value as u16);
                         }
                         HEALTH_PROP if entity.entity_index == self.local_player_id => {
                             self.current_health = value as u16;
                         }
                         OUTER_CONTAINER_PROP => {
-                            if !self.outer_map.contains_key(&value) {
-                                self.outer_map.insert(value, entity.entity_index);
-                            }
+                            self.outer_map.insert(value, entity.entity_index);
                         }
                         CLIP_PROP => {
                             let clip_max = self.max_clip.entry(entity.entity_index).or_default();
