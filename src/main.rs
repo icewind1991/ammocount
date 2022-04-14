@@ -56,10 +56,16 @@ fn main() -> Result<(), MainError> {
     writeln!(&mut health_out, "txt = []")?;
     writeln!(&mut angles_out, "txt = []")?;
     let mut last_frame = 0;
-    for data in state
+    for mut data in state
         .into_iter()
         .filter(|data| data.tick >= start && data.tick <= end)
     {
+        if data.delta_angles[1] < -180.0 {
+            data.delta_angles[1] += 360.0;
+        }
+        if data.delta_angles[1] > 180.0 {
+            data.delta_angles[1] -= 360.0;
+        }
         let frame = ((data.tick - start) as f32 * time_per_tick * 120.0) as i32;
         for frame in last_frame..frame {
             if let Some(uber) = data.uber {
