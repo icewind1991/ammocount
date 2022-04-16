@@ -56,18 +56,27 @@ fn main() -> Result<(), MainError> {
     writeln!(&mut health_out, "txt = []")?;
     writeln!(&mut angles_out, "txt = []")?;
     let mut last_frame = 0;
-    for mut data in state
+    let mut last_angles: Option<[f32; 2]> = None;
+    for data in state
         .into_iter()
         .filter(|data| data.tick >= start && data.tick <= end)
     {
-        if data.delta_angles[1] < -180.0 {
-            data.delta_angles[1] += 360.0;
-        }
-        if data.delta_angles[1] > 180.0 {
-            data.delta_angles[1] -= 360.0;
-        }
         let frame = ((data.tick - start) as f32 * time_per_tick * 120.0) as i32;
         for frame in last_frame..frame {
+            let mut delta_angles = match last_angles {
+                Some(last_angles) => [
+                    data.angles[0] - last_angles[0],
+                    data.angles[1] - last_angles[1],
+                ],
+                None => [0.0, 0.0],
+            };
+
+            if delta_angles[1] < -180.0 {
+                delta_angles[1] += 360.0;
+            }
+            if delta_angles[1] > 180.0 {
+                delta_angles[1] -= 360.0;
+            }
             if let Some(uber) = data.uber {
                 let uber_out = uber_out.get_or_insert_with(|| {
                     let mut uber_out = fs::File::create(&uber_path).unwrap();
@@ -86,8 +95,9 @@ fn main() -> Result<(), MainError> {
             writeln!(
                 &mut angles_out,
                 r#"txt[{}] = {{"pich": {}, "yaw": {}, "delta_pitch": {}, "delta_yaw" :{}}};"#,
-                frame, data.angles[0], data.angles[1], data.delta_angles[0], data.delta_angles[1]
+                frame, data.angles[0], data.angles[1], delta_angles[0], delta_angles[1]
             )?;
+            last_angles = Some(data.angles);
         }
         last_frame = frame;
     }
@@ -102,7 +112,6 @@ pub struct TickData {
     health: u16,
     uber: Option<u8>,
     angles: [f32; 2],
-    delta_angles: [f32; 2],
 }
 
 #[derive(Default)]
@@ -124,7 +133,6 @@ pub struct AmmoCountAnalyser {
     uber: u8,
     has_uber: bool,
     angles: [f32; 2],
-    delta_angles: [f32; 2],
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -173,8 +181,6 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta) {
-        self.delta_angles[0] = meta.view_angles.angles.1.x - self.angles[0];
-        self.delta_angles[1] = meta.view_angles.angles.1.y - self.angles[1];
         self.angles = [meta.view_angles.angles.1.x, meta.view_angles.angles.1.y];
         self.tick = tick;
     }
@@ -300,7 +306,6 @@ impl AmmoCountAnalyser {
                         health: self.current_health,
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.angles,
-                        delta_angles: self.delta_angles,
                     });
                 } else {
                     warn!(
