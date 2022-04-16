@@ -23,7 +23,7 @@ use tracing::warn;
 
 fn main() -> Result<(), MainError> {
     let mut args = args();
-    // tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::init();
     let bin = args.next().unwrap();
     let (path, user, start, end) = if let (Some(path), Some(user), Some(start), Some(end)) =
         (args.next(), args.next(), args.next(), args.next())
@@ -41,7 +41,7 @@ fn main() -> Result<(), MainError> {
     let file = fs::read(&path)?;
     let demo = Demo::new(&file);
     let parser = DemoParser::new_all_with_analyser(demo.get_stream(), AmmoCountAnalyser::new(user));
-    let (header, state) = parser.parse()?;
+    let (header, (state, errors)) = parser.parse()?;
     let time_per_tick = header.duration / header.ticks as f32;
     let ammo_path = format!("{}_ammo.txt", path);
     let health_path = format!("{}_health.txt", path);
@@ -101,6 +101,7 @@ fn main() -> Result<(), MainError> {
         }
         last_frame = frame;
     }
+    errors.show();
     Ok(())
 }
 
@@ -133,10 +134,11 @@ pub struct AmmoCountAnalyser {
     uber: u8,
     has_uber: bool,
     angles: [f32; 2],
+    errors: Errors,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
-    type Output = Vec<TickData>;
+    type Output = (Vec<TickData>, Errors);
 
     fn does_handle(_message_type: MessageType) -> bool {
         true
@@ -186,7 +188,7 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn into_output(self, _state: &ParserState) -> Self::Output {
-        self.output
+        (self.output, self.errors)
     }
 }
 
@@ -308,6 +310,7 @@ impl AmmoCountAnalyser {
                         angles: self.angles,
                     });
                 } else {
+                    self.errors.clip_not_found += 1;
                     warn!(
                         tick = self.tick,
                         weapon_handle = self.active_weapon,
@@ -315,7 +318,8 @@ impl AmmoCountAnalyser {
                         "can't find clip"
                     );
                 }
-            } else {
+            } else if self.active_weapon > 0 {
+                self.errors.weapon_not_found += 1;
                 warn!(
                     tick = self.tick,
                     weapon_handle = self.active_weapon,
@@ -342,5 +346,22 @@ impl AmmoCountAnalyser {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct Errors {
+    weapon_not_found: u32,
+    clip_not_found: u32,
+}
+
+impl Errors {
+    fn show(&self) {
+        if self.weapon_not_found > 0 {
+            eprint!("Weapon not found {} times", self.weapon_not_found);
+        }
+        if self.clip_not_found > 0 {
+            eprint!("Clip not found {} times", self.clip_not_found);
+        }
     }
 }
