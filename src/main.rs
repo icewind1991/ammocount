@@ -1,5 +1,9 @@
+mod wrapping;
+
+use crate::wrapping::Wrapping;
 use fnv::FnvHashMap;
 use main_error::MainError;
+use splines::{Interpolation, Key, Spline};
 use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
@@ -57,17 +61,44 @@ fn main() -> Result<(), MainError> {
     writeln!(&mut angles_out, "txt = []")?;
     let mut last_frame = 0;
     let mut last_angles: Option<[f32; 2]> = None;
+
+    let pitches: Vec<_> = state
+        .iter()
+        .map(|data| {
+            Key::new(
+                data.tick as f32,
+                Wrapping::<-180, 180>(data.angles[0]),
+                Interpolation::Cosine,
+            )
+        })
+        .collect();
+    let yaws: Vec<_> = state
+        .iter()
+        .map(|data| {
+            Key::new(
+                data.tick as f32,
+                Wrapping::<-180, 180>(data.angles[1]),
+                Interpolation::Cosine,
+            )
+        })
+        .collect();
+    let pitches = Spline::from_vec(pitches);
+    let yaws = Spline::from_vec(yaws);
+
     for data in state
         .into_iter()
         .filter(|data| data.tick >= start && data.tick <= end)
     {
         let frame = ((data.tick - start) as f32 * time_per_tick * 120.0) as i32;
         for frame in last_frame..frame {
+            let tick = (frame as f32) / time_per_tick / 120.0;
+            let tick = tick + start as f32;
+            let angles = [
+                pitches.clamped_sample(tick as f32).unwrap().0,
+                yaws.clamped_sample(tick as f32).unwrap().0,
+            ];
             let mut delta_angles = match last_angles {
-                Some(last_angles) => [
-                    data.angles[0] - last_angles[0],
-                    data.angles[1] - last_angles[1],
-                ],
+                Some(last_angles) => [angles[0] - last_angles[0], angles[1] - last_angles[1]],
                 None => [0.0, 0.0],
             };
 
@@ -95,9 +126,9 @@ fn main() -> Result<(), MainError> {
             writeln!(
                 &mut angles_out,
                 r#"txt[{}] = {{"pich": {}, "yaw": {}, "delta_pitch": {}, "delta_yaw" :{}}};"#,
-                frame, data.angles[0], data.angles[1], delta_angles[0], delta_angles[1]
+                frame, angles[0], angles[1], delta_angles[0], delta_angles[1]
             )?;
-            last_angles = Some(data.angles);
+            last_angles = Some(angles);
         }
         last_frame = frame;
     }
@@ -125,6 +156,7 @@ pub struct AmmoCountAnalyser {
     class_names: Vec<ServerClassName>,
     local_player_id: EntityId,
     local_user_id: UserId,
+    entity_classes: FnvHashMap<EntityId, ClassId>,
     outer_map: FnvHashMap<i64, EntityId>,
     active_weapon: i64,
     last_tick: u32,
@@ -274,11 +306,40 @@ impl AmmoCountAnalyser {
                             self.current_health = value as u16;
                         }
                         OUTER_CONTAINER_PROP => {
-                            self.outer_map.insert(value, entity.entity_index);
+                            if (entity.entity_index == 428 || entity.entity_index == 483)
+                                && value == 813484
+                            {
+                                // println!(
+                                //     "{} = {}({})",
+                                //     value,
+                                //     entity.entity_index,
+                                //     self.server_class(entity.server_class)
+                                // );
+                            }
+                            if !self.outer_map.contains_key(&value) {
+                                self.outer_map.insert(value, entity.entity_index);
+                            }
                         }
                         CLIP_PROP => {
-                            let clip_max = self.max_clip.entry(entity.entity_index).or_default();
-                            *clip_max = (*clip_max).max(value as u16);
+                            if self.tick > 100818 && self.tick < 100930 {
+                                // println!(
+                                //     "{}: {} ({} {})",
+                                //     self.tick,
+                                //     value,
+                                //     self.server_class(entity.server_class),
+                                //     entity.entity_index,
+                                // );
+                            }
+                            match self.entity_classes.get(&entity.entity_index) {
+                                Some(class) if *class != entity.server_class => {
+                                    self.max_clip.insert(entity.entity_index, value as u16);
+                                }
+                                _ => {
+                                    let clip_max =
+                                        self.max_clip.entry(entity.entity_index).or_default();
+                                    *clip_max = (*clip_max).max(value as u16);
+                                }
+                            }
                             self.clip.insert(entity.entity_index, value as u16);
                         }
                         _ => {}
@@ -288,8 +349,17 @@ impl AmmoCountAnalyser {
             }
         }
 
+        self.entity_classes
+            .insert(entity.entity_index, entity.server_class);
+
         if self.tick > self.last_tick {
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
+                if self.tick > 100818 && self.tick < 100930 {
+                    // println!(
+                    //     "{}: active {}({})",
+                    //     self.tick, active_weapon, self.active_weapon
+                    // );
+                }
                 if self.clip.contains_key(active_weapon) {
                     let ammo = if self.max_clip[active_weapon] > 0 {
                         self.clip[active_weapon].saturating_sub(1)

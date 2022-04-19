@@ -18,6 +18,7 @@ dependencies = [
  "fnv",
  "main_error",
  "once_cell",
+ "splines",
  "steamid-ng",
  "tf-demo-parser",
  "tracing",
@@ -460,6 +461,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45456094d1983e2ee2a18fdfebce3189fa451699d0502cb8e3b49dba5ba41451"
 
 [[package]]
+name = "splines"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85d3c90d443c10f66d69fc45269f3bf1d3b0171c239751fe6129b7d79a82c535"
+
+[[package]]
 name = "steamid-ng"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -534,7 +541,7 @@ dependencies = [
 [[package]]
 name = "tf-demo-parser"
 version = "0.4.0"
-source = "git+https://github.com/demostf/parser#5adcdd046b6a38789341b3399cf3e73eee4996f7"
+source = "git+https://github.com/demostf/parser#ec57a76101c57f0727a5bdc474f1e0c7cf0237ca"
 dependencies = [
  "bitbuffer",
  "enumflags2",
