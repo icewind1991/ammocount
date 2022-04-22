@@ -50,15 +50,18 @@ fn main() -> Result<(), MainError> {
     let ammo_path = format!("{}_ammo.txt", path);
     let health_path = format!("{}_health.txt", path);
     let uber_path = format!("{}_uber.txt", path);
-    let angles_path = format!("{}_angles.txt", path);
+    let pitch_path = format!("{}_pitch.txt", path);
+    let yaw_path = format!("{}_yaw.txt", path);
     let mut ammo_out = fs::File::create(ammo_path)?;
     let mut health_out = fs::File::create(health_path)?;
-    let mut angles_out = fs::File::create(angles_path)?;
+    let mut pitch_out = fs::File::create(pitch_path)?;
+    let mut yaw_out = fs::File::create(yaw_path)?;
     let mut uber_out = None;
     println!("txt = []");
     writeln!(&mut ammo_out, "txt = []")?;
     writeln!(&mut health_out, "txt = []")?;
-    writeln!(&mut angles_out, "txt = []")?;
+    writeln!(&mut pitch_out, "txt = []")?;
+    writeln!(&mut yaw_out, "txt = []")?;
     let mut last_frame = 0;
     let mut last_angles: Option<[f32; 2]> = None;
 
@@ -123,11 +126,8 @@ fn main() -> Result<(), MainError> {
                 frame, data.ammo, data.max_ammo
             )?;
             writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, data.health)?;
-            writeln!(
-                &mut angles_out,
-                r#"txt[{}] = {{"pich": {}, "yaw": {}, "delta_pitch": {}, "delta_yaw" :{}}};"#,
-                frame, angles[0], angles[1], delta_angles[0], delta_angles[1]
-            )?;
+            writeln!(&mut pitch_out, r#"txt[{}] = {};"#, frame, delta_angles[0])?;
+            writeln!(&mut yaw_out, r#"txt[{}] = {};"#, frame, delta_angles[1])?;
             last_angles = Some(angles);
         }
         last_frame = frame;
