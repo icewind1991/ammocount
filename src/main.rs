@@ -215,7 +215,7 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta) {
-        self.angles = [meta.view_angles.angles.1.x, meta.view_angles.angles.1.y];
+        self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
         self.tick = tick;
     }
 
