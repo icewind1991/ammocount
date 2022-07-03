@@ -402,13 +402,14 @@ impl AmmoCountAnalyser {
 
     fn parse_user_info(&mut self, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
         if let Some(user_info) = UserInfo::parse_from_string_table(text, data)? {
+            let user_steam_id = SteamID::try_from(user_info.player_info.steam_id.as_str()).ok();
             if user_info
                 .player_info
                 .name
                 .to_ascii_lowercase()
                 .contains(&self.target_user_name)
-                || SteamID::try_from(self.target_user_name.as_str()).ok()
-                    == SteamID::try_from(user_info.player_info.steam_id.as_str()).ok()
+                || (user_steam_id.is_some()
+                    && SteamID::try_from(self.target_user_name.as_str()).ok() == user_steam_id)
             {
                 self.local_player_id = user_info.entity_id;
                 self.local_user_id = user_info.player_info.user_id;
