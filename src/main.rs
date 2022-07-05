@@ -52,18 +52,25 @@ fn main() -> Result<(), MainError> {
     let uber_path = format!("{}_uber.txt", path);
     let pitch_path = format!("{}_pitch.txt", path);
     let yaw_path = format!("{}_yaw.txt", path);
+    let hit_path = format!("{}_hit.txt", path);
     let mut ammo_out = fs::File::create(ammo_path)?;
     let mut health_out = fs::File::create(health_path)?;
     let mut pitch_out = fs::File::create(pitch_path)?;
     let mut yaw_out = fs::File::create(yaw_path)?;
+    let mut hit_out = fs::File::create(hit_path)?;
     let mut uber_out = None;
     println!("txt = []");
     writeln!(&mut ammo_out, "txt = []")?;
     writeln!(&mut health_out, "txt = []")?;
     writeln!(&mut pitch_out, "txt = []")?;
     writeln!(&mut yaw_out, "txt = []")?;
+    writeln!(&mut hit_out, "txt = []")?;
     let mut last_frame = 0;
     let mut last_angles: Option<[f32; 2]> = None;
+
+    let mut hit_last_damage: u32 = 0;
+    let mut hit_last_tick: u32 = 0;
+    let hit_time: u32 = 33;
 
     let pitches: Vec<_> = state
         .iter()
@@ -93,6 +100,15 @@ fn main() -> Result<(), MainError> {
         .filter(|data| data.tick >= start && data.tick <= end)
     {
         let frame = ((data.tick - start) as f32 * time_per_tick * 120.0) as i32;
+
+        if let Some(hit) = data.hit {
+            hit_last_damage = hit;
+            hit_last_tick = data.tick;
+        }
+        let hit_ratio =
+            (hit_time.saturating_sub(data.tick - hit_last_tick) as f64) / (hit_time as f64);
+        let hit_number = hit_last_damage as f64 * hit_ratio;
+
         for frame in last_frame..frame {
             let tick = (frame as f32) / time_per_tick / 120.0;
             let tick = tick + start as f32;
@@ -119,7 +135,7 @@ fn main() -> Result<(), MainError> {
                 });
                 writeln!(uber_out, "txt[{}] = \"{}\";", frame, uber)?;
             }
-            println!("txt[{}] = \"{}/{}\";", frame, data.ammo, data.max_ammo);
+            // println!("txt[{}] = \"{}/{}\";", frame, data.ammo, data.max_ammo);
             writeln!(
                 &mut ammo_out,
                 "txt[{}] = \"{}/{}\";",
@@ -128,6 +144,7 @@ fn main() -> Result<(), MainError> {
             writeln!(&mut health_out, "txt[{}] = \"{}\";", frame, data.health)?;
             writeln!(&mut pitch_out, r#"txt[{}] = {};"#, frame, delta_angles[0])?;
             writeln!(&mut yaw_out, r#"txt[{}] = {};"#, frame, delta_angles[1])?;
+            writeln!(&mut hit_out, r#"txt[{}] = {};"#, frame, hit_number as u32)?;
             last_angles = Some(angles);
         }
         last_frame = frame;
@@ -144,6 +161,7 @@ pub struct TickData {
     health: u16,
     uber: Option<u8>,
     angles: [f32; 2],
+    hit: Option<u32>,
 }
 
 #[derive(Default)]
@@ -167,6 +185,10 @@ pub struct AmmoCountAnalyser {
     has_uber: bool,
     angles: [f32; 2],
     errors: Errors,
+    damage_done: u32,
+    last_hit_damage: u32,
+    last_hit_tick: u32,
+    hit: bool,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -236,6 +258,9 @@ const UBER_CHARGE_PROP: SendPropIdentifier =
 #[allow(dead_code)]
 const UBER_CHARGE_PROP_LOCAL: SendPropIdentifier =
     SendPropIdentifier::new("DT_LocalTFWeaponMedigunData", "m_flChargeLevel");
+#[allow(dead_code)]
+const DAMAGE_PROP_LOCAL: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFPlayerScoringDataExclusive", "m_iDamageDone");
 
 #[allow(dead_code)]
 const WEAPON1_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "000");
@@ -276,6 +301,8 @@ impl AmmoCountAnalyser {
     }
 
     fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity) {
+        let last_damage_done = self.damage_done;
+
         for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
@@ -304,6 +331,9 @@ impl AmmoCountAnalyser {
                         }
                         HEALTH_PROP if entity.entity_index == self.local_player_id => {
                             self.current_health = value as u16;
+                        }
+                        DAMAGE_PROP_LOCAL if entity.entity_index == self.local_player_id => {
+                            self.damage_done = value as u32;
                         }
                         OUTER_CONTAINER_PROP => {
                             if (entity.entity_index == 428 || entity.entity_index == 483)
@@ -378,6 +408,7 @@ impl AmmoCountAnalyser {
                         health: self.current_health,
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.angles,
+                        hit: self.hit.then_some(self.last_hit_damage),
                     });
                 } else {
                     self.errors.clip_not_found += 1;
@@ -395,6 +426,13 @@ impl AmmoCountAnalyser {
                     weapon_handle = self.active_weapon,
                     "can't find weapon"
                 );
+            }
+            if self.damage_done > last_damage_done {
+                self.last_hit_damage = self.damage_done - last_damage_done;
+                self.last_hit_tick = self.tick;
+                self.hit = true;
+            } else {
+                self.hit = false;
             }
             self.last_tick = self.tick;
         }
