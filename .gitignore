@@ -1,2 +1,5 @@
 /target
+/result
+.direnv
+config.toml
 data

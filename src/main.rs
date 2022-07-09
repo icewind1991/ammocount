@@ -53,18 +53,20 @@ fn main() -> Result<(), MainError> {
     let pitch_path = format!("{}_pitch.txt", path);
     let yaw_path = format!("{}_yaw.txt", path);
     let hit_path = format!("{}_hit.txt", path);
+    let weapon_path = format!("{}_weapon.txt", path);
     let mut ammo_out = fs::File::create(ammo_path)?;
     let mut health_out = fs::File::create(health_path)?;
     let mut pitch_out = fs::File::create(pitch_path)?;
     let mut yaw_out = fs::File::create(yaw_path)?;
     let mut hit_out = fs::File::create(hit_path)?;
+    let mut weapon_out = fs::File::create(weapon_path)?;
     let mut uber_out = None;
-    println!("txt = []");
     writeln!(&mut ammo_out, "txt = []")?;
     writeln!(&mut health_out, "txt = []")?;
     writeln!(&mut pitch_out, "txt = []")?;
     writeln!(&mut yaw_out, "txt = []")?;
     writeln!(&mut hit_out, "txt = []")?;
+    writeln!(&mut weapon_out, "txt = []")?;
     let mut last_frame = 0;
     let mut last_angles: Option<[f32; 2]> = None;
 
@@ -94,6 +96,8 @@ fn main() -> Result<(), MainError> {
         .collect();
     let pitches = Spline::from_vec(pitches);
     let yaws = Spline::from_vec(yaws);
+
+    let mut ticks_done = 0;
 
     for data in state
         .into_iter()
@@ -145,15 +149,18 @@ fn main() -> Result<(), MainError> {
             writeln!(&mut pitch_out, r#"txt[{}] = {};"#, frame, delta_angles[0])?;
             writeln!(&mut yaw_out, r#"txt[{}] = {};"#, frame, delta_angles[1])?;
             writeln!(&mut hit_out, r#"txt[{}] = {};"#, frame, hit_number as u32)?;
+            writeln!(&mut weapon_out, r#"txt[{}] = "{}";"#, frame, data.weapon)?;
+            ticks_done += 1;
             last_angles = Some(angles);
         }
         last_frame = frame;
     }
+    println!("{} frames processed", ticks_done);
+
     errors.show();
     Ok(())
 }
 
-#[derive(Default)]
 pub struct TickData {
     tick: u32,
     ammo: u16,
@@ -162,6 +169,7 @@ pub struct TickData {
     uber: Option<u8>,
     angles: [f32; 2],
     hit: Option<u32>,
+    weapon: ServerClassName,
 }
 
 #[derive(Default)]
@@ -336,30 +344,11 @@ impl AmmoCountAnalyser {
                             self.damage_done = value as u32;
                         }
                         OUTER_CONTAINER_PROP => {
-                            if (entity.entity_index == 428 || entity.entity_index == 483)
-                                && value == 813484
-                            {
-                                // println!(
-                                //     "{} = {}({})",
-                                //     value,
-                                //     entity.entity_index,
-                                //     self.server_class(entity.server_class)
-                                // );
-                            }
                             if !self.outer_map.contains_key(&value) {
                                 self.outer_map.insert(value, entity.entity_index);
                             }
                         }
                         CLIP_PROP => {
-                            if self.tick > 100818 && self.tick < 100930 {
-                                // println!(
-                                //     "{}: {} ({} {})",
-                                //     self.tick,
-                                //     value,
-                                //     self.server_class(entity.server_class),
-                                //     entity.entity_index,
-                                // );
-                            }
                             match self.entity_classes.get(&entity.entity_index) {
                                 Some(class) if *class != entity.server_class => {
                                     self.max_clip.insert(entity.entity_index, value as u16);
@@ -384,12 +373,6 @@ impl AmmoCountAnalyser {
 
         if self.tick > self.last_tick {
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
-                if self.tick > 100818 && self.tick < 100930 {
-                    // println!(
-                    //     "{}: active {}({})",
-                    //     self.tick, active_weapon, self.active_weapon
-                    // );
-                }
                 if self.clip.contains_key(active_weapon) {
                     let ammo = if self.max_clip[active_weapon] > 0 {
                         self.clip[active_weapon].saturating_sub(1)
@@ -401,6 +384,7 @@ impl AmmoCountAnalyser {
                     } else {
                         self.max_ammo[0]
                     };
+                    let weapon_class = self.entity_classes.get(active_weapon).unwrap();
                     self.output.push(TickData {
                         tick: self.tick,
                         ammo,
@@ -409,6 +393,7 @@ impl AmmoCountAnalyser {
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.angles,
                         hit: self.hit.then_some(self.last_hit_damage),
+                        weapon: self.class_names[usize::from(*weapon_class)].clone(),
                     });
                 } else {
                     self.errors.clip_not_found += 1;
