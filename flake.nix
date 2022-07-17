@@ -36,7 +36,7 @@
           mingw_w64_cc
         ];
         depsBuildBuild = [ pkgs.wine64 ];
-        buildInputs = [ windows.pthreads ];
+#        buildInputs = [ windows.pthreads ];
 
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${mingw_w64_cc.targetPrefix}cc";
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER = "wine64";

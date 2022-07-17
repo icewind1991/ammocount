@@ -20,7 +20,7 @@ use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
-use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropValue};
+use tf_demo_parser::demo::sendprop::{SendProp, SendPropIdentifier, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
 use tf_demo_parser::{DemoParser, ReadResult, Stream};
 use tracing::warn;
@@ -254,9 +254,16 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 }
 
+enum AttributeProviderTypes {
+    Generic = 0,
+    Weapon = 1,
+}
+
 const CLIP_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_LocalWeaponData", "m_iClip1");
 const OUTER_CONTAINER_PROP: SendPropIdentifier =
     SendPropIdentifier::new("DT_AttributeContainer", "m_hOuter");
+const OUTER_CONTAINER_TYPE_PROP: SendPropIdentifier =
+    SendPropIdentifier::new("DT_AttributeContainer", "m_ProviderType");
 const ACTIVE_WEAPON_PROP: SendPropIdentifier =
     SendPropIdentifier::new("DT_BaseCombatCharacter", "m_hActiveWeapon");
 const HEALTH_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BasePlayer", "m_iHealth");
@@ -327,6 +334,9 @@ impl AmmoCountAnalyser {
                     }
                     match prop.identifier {
                         ACTIVE_WEAPON_PROP if entity.entity_index == self.local_player_id => {
+                            if self.tick > 54200 && self.tick < 54220 {
+                                // dbg!(value);
+                            }
                             self.active_weapon = value;
                         }
                         AMMO1_PROP if entity.entity_index == self.local_player_id => {
@@ -344,9 +354,28 @@ impl AmmoCountAnalyser {
                             self.damage_done = value as u32;
                         }
                         OUTER_CONTAINER_PROP => {
-                            if !self.outer_map.contains_key(&value) {
-                                self.outer_map.insert(value, entity.entity_index);
+                            if self.tick > 54200 && self.tick < 54220 {
+                                // dbg!(value);
                             }
+                            match entity.get_prop_by_identifier(&OUTER_CONTAINER_TYPE_PROP) {
+                                Some(SendProp {
+                                    value: SendPropValue::Integer(container_type),
+                                    ..
+                                }) if *container_type
+                                    == AttributeProviderTypes::Weapon as u8 as i64 =>
+                                {
+                                    self.outer_map.insert(value, entity.entity_index);
+                                }
+                                None => {
+                                    // self.outer_map.insert(value, entity.entity_index);
+                                }
+                                _ => {
+                                    // self.outer_map.insert(value, entity.entity_index);
+                                }
+                            }
+                            // if !self.outer_map.contains_key(&value) {
+                            // self.outer_map.insert(value, entity.entity_index);
+                            // }
                         }
                         CLIP_PROP => {
                             match self.entity_classes.get(&entity.entity_index) {
@@ -385,6 +414,15 @@ impl AmmoCountAnalyser {
                         self.max_ammo[0]
                     };
                     let weapon_class = self.entity_classes.get(active_weapon).unwrap();
+                    let weapon = self.class_names[usize::from(*weapon_class)].clone();
+                    if self.tick > 54200 && self.tick < 54220 {
+                        println!(
+                            "{} {} {}",
+                            weapon,
+                            active_weapon,
+                            self.clip[active_weapon].saturating_sub(1)
+                        );
+                    }
                     self.output.push(TickData {
                         tick: self.tick,
                         ammo,
@@ -393,7 +431,7 @@ impl AmmoCountAnalyser {
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.angles,
                         hit: self.hit.then_some(self.last_hit_damage),
-                        weapon: self.class_names[usize::from(*weapon_class)].clone(),
+                        weapon,
                     });
                 } else {
                     self.errors.clip_not_found += 1;
