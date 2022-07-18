@@ -193,10 +193,8 @@ pub struct AmmoCountAnalyser {
     has_uber: bool,
     angles: [f32; 2],
     errors: Errors,
-    damage_done: u32,
-    last_hit_damage: u32,
-    last_hit_tick: u32,
-    hit: bool,
+    hit: Option<u32>,
+    pov: EntityId,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -208,6 +206,9 @@ impl MessageHandler for AmmoCountAnalyser {
 
     fn handle_message(&mut self, message: &Message, tick: u32) {
         match message {
+            Message::ServerInfo(info) => {
+                self.pov = (info.player_slot as u32 + 1).into();
+            }
             Message::PacketEntities(entities) => {
                 for entity in &entities.entities {
                     self.handle_entity(tick, entity)
@@ -245,7 +246,13 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta) {
-        self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
+        if self.hit.is_some() {
+            // dbg!(self.hit, self.last_tick, tick);
+        }
+        self.hit = None;
+        if self.is_pov() {
+            self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
+        }
         self.tick = tick;
     }
 
@@ -254,6 +261,7 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 }
 
+#[allow(dead_code)]
 enum AttributeProviderTypes {
     Generic = 0,
     Weapon = 1,
@@ -276,6 +284,12 @@ const UBER_CHARGE_PROP_LOCAL: SendPropIdentifier =
 #[allow(dead_code)]
 const DAMAGE_PROP_LOCAL: SendPropIdentifier =
     SendPropIdentifier::new("DT_TFPlayerScoringDataExclusive", "m_iDamageDone");
+#[allow(dead_code)]
+const EYE_ANGLES_X: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[0]");
+#[allow(dead_code)]
+const EYE_ANGLES_Y: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[1]");
 
 #[allow(dead_code)]
 const WEAPON1_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "000");
@@ -299,6 +313,10 @@ impl AmmoCountAnalyser {
         }
     }
 
+    fn is_pov(&self) -> bool {
+        self.pov == self.local_player_id
+    }
+
     #[allow(dead_code)]
     fn server_class(&self, id: ClassId) -> &str {
         self.class_names[u16::from(id) as usize].as_str()
@@ -311,13 +329,16 @@ impl AmmoCountAnalyser {
                     self.clip = self.max_clip.clone();
                 }
             }
+            GameEvent::PlayerHurt(event) => {
+                if UserId::from(event.user_id) == self.local_user_id {
+                    self.hit = Some(event.damage_amount as u32);
+                }
+            }
             _ => {}
         }
     }
 
     fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity) {
-        let last_damage_done = self.damage_done;
-
         for prop in entity.props() {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
@@ -349,9 +370,6 @@ impl AmmoCountAnalyser {
                         }
                         HEALTH_PROP if entity.entity_index == self.local_player_id => {
                             self.current_health = value as u16;
-                        }
-                        DAMAGE_PROP_LOCAL if entity.entity_index == self.local_player_id => {
-                            self.damage_done = value as u32;
                         }
                         OUTER_CONTAINER_PROP => {
                             if self.tick > 54200 && self.tick < 54220 {
@@ -393,6 +411,15 @@ impl AmmoCountAnalyser {
                         _ => {}
                     }
                 }
+                SendPropValue::Float(value) => match prop.identifier {
+                    EYE_ANGLES_X if !self.is_pov() => {
+                        self.angles[0] = value;
+                    }
+                    EYE_ANGLES_Y if !self.is_pov() => {
+                        self.angles[1] = value;
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -430,7 +457,7 @@ impl AmmoCountAnalyser {
                         health: self.current_health,
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.angles,
-                        hit: self.hit.then_some(self.last_hit_damage),
+                        hit: self.hit,
                         weapon,
                     });
                 } else {
@@ -449,13 +476,6 @@ impl AmmoCountAnalyser {
                     weapon_handle = self.active_weapon,
                     "can't find weapon"
                 );
-            }
-            if self.damage_done > last_damage_done {
-                self.last_hit_damage = self.damage_done - last_damage_done;
-                self.last_hit_tick = self.tick;
-                self.hit = true;
-            } else {
-                self.hit = false;
             }
             self.last_tick = self.tick;
         }
