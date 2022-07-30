@@ -4,6 +4,7 @@ use crate::wrapping::Wrapping;
 use fnv::FnvHashMap;
 use main_error::MainError;
 use splines::{Interpolation, Key, Spline};
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
@@ -305,6 +306,24 @@ const AMMO2_PROP: SendPropIdentifier = SendPropIdentifier::new("m_iAmmo", "002")
 
 const OUTER_NULL: i64 = 0x1FFFFF;
 
+const RELEVANT_PROPS: &[SendPropIdentifier] = &[
+    CLIP_PROP,
+    OUTER_CONTAINER_PROP,
+    OUTER_CONTAINER_TYPE_PROP,
+    ACTIVE_WEAPON_PROP,
+    HEALTH_PROP,
+    UBER_CHARGE_PROP,
+    UBER_CHARGE_PROP_LOCAL,
+    DAMAGE_PROP_LOCAL,
+    EYE_ANGLES_X,
+    EYE_ANGLES_Y,
+    WEAPON1_ID_PROP,
+    WEAPON2_ID_PROP,
+    WEAPON3_ID_PROP,
+    AMMO1_PROP,
+    AMMO2_PROP,
+];
+
 impl AmmoCountAnalyser {
     pub fn new(target_user_name: String) -> Self {
         AmmoCountAnalyser {
@@ -339,7 +358,7 @@ impl AmmoCountAnalyser {
     }
 
     fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity) {
-        for prop in entity.props() {
+        for prop in get_props(entity, RELEVANT_PROPS) {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
                     if let Some((table_name, prop_name)) = prop.identifier.names() {
@@ -355,9 +374,6 @@ impl AmmoCountAnalyser {
                     }
                     match prop.identifier {
                         ACTIVE_WEAPON_PROP if entity.entity_index == self.local_player_id => {
-                            if self.tick > 54200 && self.tick < 54220 {
-                                // dbg!(value);
-                            }
                             self.active_weapon = value;
                         }
                         AMMO1_PROP if entity.entity_index == self.local_player_id => {
@@ -372,9 +388,6 @@ impl AmmoCountAnalyser {
                             self.current_health = value as u16;
                         }
                         OUTER_CONTAINER_PROP => {
-                            if self.tick > 54200 && self.tick < 54220 {
-                                // dbg!(value);
-                            }
                             match entity.get_prop_by_identifier(&OUTER_CONTAINER_TYPE_PROP) {
                                 Some(SendProp {
                                     value: SendPropValue::Integer(container_type),
@@ -384,16 +397,8 @@ impl AmmoCountAnalyser {
                                 {
                                     self.outer_map.insert(value, entity.entity_index);
                                 }
-                                None => {
-                                    // self.outer_map.insert(value, entity.entity_index);
-                                }
-                                _ => {
-                                    // self.outer_map.insert(value, entity.entity_index);
-                                }
+                                _ => {}
                             }
-                            // if !self.outer_map.contains_key(&value) {
-                            // self.outer_map.insert(value, entity.entity_index);
-                            // }
                         }
                         CLIP_PROP => {
                             match self.entity_classes.get(&entity.entity_index) {
@@ -442,14 +447,6 @@ impl AmmoCountAnalyser {
                     };
                     let weapon_class = self.entity_classes.get(active_weapon).unwrap();
                     let weapon = self.class_names[usize::from(*weapon_class)].clone();
-                    if self.tick > 54200 && self.tick < 54220 {
-                        println!(
-                            "{} {} {}",
-                            weapon,
-                            active_weapon,
-                            self.clip[active_weapon].saturating_sub(1)
-                        );
-                    }
                     self.output.push(TickData {
                         tick: self.tick,
                         ammo,
@@ -516,4 +513,18 @@ impl Errors {
             eprint!("Clip not found {} times", self.clip_not_found);
         }
     }
+}
+
+/// Get a number of props from an entity
+fn get_props(
+    entity: &PacketEntity,
+    prop_identifiers: &[SendPropIdentifier],
+) -> impl Iterator<Item = SendProp> {
+    let mut props = BTreeMap::new();
+    for prop in entity.props() {
+        if prop_identifiers.contains(&prop.identifier) {
+            props.insert(prop.identifier, prop.clone());
+        }
+    }
+    props.into_values()
 }
