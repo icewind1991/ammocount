@@ -4,7 +4,7 @@ use crate::wrapping::Wrapping;
 use fnv::FnvHashMap;
 use main_error::MainError;
 use splines::{Interpolation, Key, Spline};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
@@ -20,6 +20,7 @@ use tf_demo_parser::demo::packet::datatable::{
 use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
+use tf_demo_parser::demo::parser::state::StaticBaseline;
 use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendProp, SendPropIdentifier, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
@@ -247,9 +248,6 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta) {
-        if self.hit.is_some() {
-            // dbg!(self.hit, self.last_tick, tick);
-        }
         self.hit = None;
         if self.is_pov() {
             self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
@@ -388,17 +386,7 @@ impl AmmoCountAnalyser {
                             self.current_health = value as u16;
                         }
                         OUTER_CONTAINER_PROP => {
-                            match entity.get_prop_by_identifier(&OUTER_CONTAINER_TYPE_PROP) {
-                                Some(SendProp {
-                                    value: SendPropValue::Integer(container_type),
-                                    ..
-                                }) if *container_type
-                                    == AttributeProviderTypes::Weapon as u8 as i64 =>
-                                {
-                                    self.outer_map.insert(value, entity.entity_index);
-                                }
-                                _ => {}
-                            }
+                            self.outer_map.insert(value, entity.entity_index);
                         }
                         CLIP_PROP => {
                             match self.entity_classes.get(&entity.entity_index) {
