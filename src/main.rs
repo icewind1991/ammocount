@@ -210,6 +210,9 @@ impl MessageHandler for AmmoCountAnalyser {
         match message {
             Message::ServerInfo(info) => {
                 self.pov = (info.player_slot as u32 + 1).into();
+                if info.player_slot > 0 {
+                    self.local_player_id = self.pov;
+                }
             }
             Message::PacketEntities(entities) => {
                 for entity in &entities.entities {
@@ -477,8 +480,11 @@ impl AmmoCountAnalyser {
                 || (user_steam_id.is_some()
                     && SteamID::try_from(self.target_user_name.as_str()).ok() == user_steam_id)
             {
-                self.local_player_id = user_info.entity_id;
-                self.local_user_id = user_info.player_info.user_id;
+                if self.pov == 1 {
+                    // only allow setting players for stv demos
+                    self.local_player_id = user_info.entity_id;
+                    self.local_user_id = user_info.player_info.user_id;
+                }
             }
         }
 
