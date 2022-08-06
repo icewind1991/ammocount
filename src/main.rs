@@ -4,7 +4,7 @@ use crate::wrapping::Wrapping;
 use fnv::FnvHashMap;
 use main_error::MainError;
 use splines::{Interpolation, Key, Spline};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
@@ -20,9 +20,8 @@ use tf_demo_parser::demo::packet::datatable::{
 use tf_demo_parser::demo::packet::message::MessagePacketMeta;
 use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
-use tf_demo_parser::demo::parser::state::StaticBaseline;
 use tf_demo_parser::demo::parser::MessageHandler;
-use tf_demo_parser::demo::sendprop::{SendProp, SendPropIdentifier, SendPropValue};
+use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropValue};
 use tf_demo_parser::{Demo, MessageType, ParserState};
 use tf_demo_parser::{DemoParser, ReadResult, Stream};
 use tracing::warn;
@@ -171,7 +170,7 @@ pub struct TickData {
     uber: Option<u8>,
     angles: [f32; 2],
     hit: Option<u32>,
-    weapon: ServerClassName,
+    weapon: String,
 }
 
 #[derive(Default)]
@@ -186,6 +185,7 @@ pub struct AmmoCountAnalyser {
     local_user_id: UserId,
     entity_classes: FnvHashMap<EntityId, ClassId>,
     outer_map: FnvHashMap<i64, EntityId>,
+    model_names: Vec<String>,
     active_weapon: i64,
     last_tick: u32,
     target_user_name: String,
@@ -197,6 +197,7 @@ pub struct AmmoCountAnalyser {
     errors: Errors,
     hit: Option<u32>,
     pov: EntityId,
+    model_indexes: HashMap<EntityId, u32>,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -206,7 +207,7 @@ impl MessageHandler for AmmoCountAnalyser {
         true
     }
 
-    fn handle_message(&mut self, message: &Message, tick: u32) {
+    fn handle_message(&mut self, message: &Message, tick: u32, state: &ParserState) {
         match message {
             Message::ServerInfo(info) => {
                 self.pov = (info.player_slot as u32 + 1).into();
@@ -216,7 +217,7 @@ impl MessageHandler for AmmoCountAnalyser {
             }
             Message::PacketEntities(entities) => {
                 for entity in &entities.entities {
-                    self.handle_entity(tick, entity)
+                    self.handle_entity(tick, entity, state)
                 }
             }
             Message::GameEvent(event_msg) => {
@@ -226,13 +227,25 @@ impl MessageHandler for AmmoCountAnalyser {
         }
     }
 
-    fn handle_string_entry(&mut self, table: &str, _index: usize, entry: &StringTableEntry) {
+    fn handle_string_entry(
+        &mut self,
+        table: &str,
+        index: usize,
+        entry: &StringTableEntry,
+        _state: &ParserState,
+    ) {
         match table {
             "userinfo" => {
                 let _ = self.parse_user_info(
                     entry.text.as_ref().map(|s| s.as_ref()),
                     entry.extra_data.as_ref().map(|data| data.data.clone()),
                 );
+            }
+            "modelprecache" => {
+                let model = entry.text.as_deref().unwrap_or_default();
+                let file_name = model.rsplit_once('/').unwrap_or_default().1;
+                let name = file_name.split_once('.').unwrap_or_default().0;
+                self.model_names.insert(index, name.to_string())
             }
             _ => {}
         }
@@ -242,6 +255,7 @@ impl MessageHandler for AmmoCountAnalyser {
         &mut self,
         _parse_tables: &[ParseSendTable],
         server_classes: &[ServerClass],
+        _state: &ParserState,
     ) {
         self.class_names = server_classes
             .iter()
@@ -250,7 +264,7 @@ impl MessageHandler for AmmoCountAnalyser {
             .collect();
     }
 
-    fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta) {
+    fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta, _state: &ParserState) {
         self.hit = None;
         if self.is_pov() {
             self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
@@ -261,12 +275,6 @@ impl MessageHandler for AmmoCountAnalyser {
     fn into_output(self, _state: &ParserState) -> Self::Output {
         (self.output, self.errors)
     }
-}
-
-#[allow(dead_code)]
-enum AttributeProviderTypes {
-    Generic = 0,
-    Weapon = 1,
 }
 
 const CLIP_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_LocalWeaponData", "m_iClip1");
@@ -305,25 +313,11 @@ const AMMO1_PROP: SendPropIdentifier = SendPropIdentifier::new("m_iAmmo", "001")
 #[allow(dead_code)]
 const AMMO2_PROP: SendPropIdentifier = SendPropIdentifier::new("m_iAmmo", "002");
 
-const OUTER_NULL: i64 = 0x1FFFFF;
+#[allow(dead_code)]
+const MODEL_INDEX: SendPropIdentifier =
+    SendPropIdentifier::new("DT_BaseCombatWeapon", "m_iWorldModelIndex");
 
-const RELEVANT_PROPS: &[SendPropIdentifier] = &[
-    CLIP_PROP,
-    OUTER_CONTAINER_PROP,
-    OUTER_CONTAINER_TYPE_PROP,
-    ACTIVE_WEAPON_PROP,
-    HEALTH_PROP,
-    UBER_CHARGE_PROP,
-    UBER_CHARGE_PROP_LOCAL,
-    DAMAGE_PROP_LOCAL,
-    EYE_ANGLES_X,
-    EYE_ANGLES_Y,
-    WEAPON1_ID_PROP,
-    WEAPON2_ID_PROP,
-    WEAPON3_ID_PROP,
-    AMMO1_PROP,
-    AMMO2_PROP,
-];
+const OUTER_NULL: i64 = 0x1FFFFF;
 
 impl AmmoCountAnalyser {
     pub fn new(target_user_name: String) -> Self {
@@ -358,8 +352,8 @@ impl AmmoCountAnalyser {
         }
     }
 
-    fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity) {
-        for prop in get_props(entity, RELEVANT_PROPS) {
+    fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity, state: &ParserState) {
+        for prop in entity.props(state) {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
                     if let Some((table_name, prop_name)) = prop.identifier.names() {
@@ -404,6 +398,9 @@ impl AmmoCountAnalyser {
                             }
                             self.clip.insert(entity.entity_index, value as u16);
                         }
+                        MODEL_INDEX => {
+                            self.model_indexes.insert(entity.entity_index, value as u32);
+                        }
                         _ => {}
                     }
                 }
@@ -436,8 +433,12 @@ impl AmmoCountAnalyser {
                     } else {
                         self.max_ammo[0]
                     };
-                    let weapon_class = self.entity_classes.get(active_weapon).unwrap();
-                    let weapon = self.class_names[usize::from(*weapon_class)].clone();
+
+                    let model_index = self
+                        .model_indexes
+                        .get(active_weapon)
+                        .copied()
+                        .unwrap_or_default();
                     self.output.push(TickData {
                         tick: self.tick,
                         ammo,
@@ -446,7 +447,11 @@ impl AmmoCountAnalyser {
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.angles,
                         hit: self.hit,
-                        weapon,
+                        weapon: self
+                            .model_names
+                            .get(model_index as usize)
+                            .cloned()
+                            .unwrap_or_default(),
                     });
                 } else {
                     self.errors.clip_not_found += 1;
@@ -507,18 +512,4 @@ impl Errors {
             eprint!("Clip not found {} times", self.clip_not_found);
         }
     }
-}
-
-/// Get a number of props from an entity
-fn get_props(
-    entity: &PacketEntity,
-    prop_identifiers: &[SendPropIdentifier],
-) -> impl Iterator<Item = SendProp> {
-    let mut props = BTreeMap::new();
-    for prop in entity.props() {
-        if prop_identifiers.contains(&prop.identifier) {
-            props.insert(prop.identifier, prop.clone());
-        }
-    }
-    props.into_values()
 }
