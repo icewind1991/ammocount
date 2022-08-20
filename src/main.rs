@@ -1,5 +1,7 @@
+mod playersearch;
 mod wrapping;
 
+use crate::playersearch::get_player;
 use crate::wrapping::Wrapping;
 use fnv::FnvHashMap;
 use main_error::MainError;
@@ -45,7 +47,11 @@ fn main() -> Result<(), MainError> {
     };
     let file = fs::read(&path)?;
     let demo = Demo::new(&file);
-    let parser = DemoParser::new_all_with_analyser(demo.get_stream(), AmmoCountAnalyser::new(user));
+    let (local_player_id, local_user_id) = get_player(&demo, Some(user));
+    let parser = DemoParser::new_all_with_analyser(
+        demo.get_stream(),
+        AmmoCountAnalyser::new(local_player_id, local_user_id),
+    );
     let (header, (state, errors)) = parser.parse()?;
     let time_per_tick = header.duration / header.ticks as f32;
     let ammo_path = format!("{}_ammo.txt", path);
@@ -318,9 +324,10 @@ const MODEL_INDEX: SendPropIdentifier =
 const OUTER_NULL: i64 = 0x1FFFFF;
 
 impl AmmoCountAnalyser {
-    pub fn new(target_user_name: String) -> Self {
+    pub fn new(local_player_id: EntityId, local_user_id: UserId) -> Self {
         AmmoCountAnalyser {
-            target_user_name: target_user_name.to_ascii_lowercase(),
+            local_player_id,
+            local_user_id,
             ..Default::default()
         }
     }
