@@ -280,8 +280,6 @@ impl MessageHandler for AmmoCountAnalyser {
 const CLIP_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_LocalWeaponData", "m_iClip1");
 const OUTER_CONTAINER_PROP: SendPropIdentifier =
     SendPropIdentifier::new("DT_AttributeContainer", "m_hOuter");
-const OUTER_CONTAINER_TYPE_PROP: SendPropIdentifier =
-    SendPropIdentifier::new("DT_AttributeContainer", "m_ProviderType");
 const ACTIVE_WEAPON_PROP: SendPropIdentifier =
     SendPropIdentifier::new("DT_BaseCombatCharacter", "m_hActiveWeapon");
 const HEALTH_PROP: SendPropIdentifier = SendPropIdentifier::new("DT_BasePlayer", "m_iHealth");

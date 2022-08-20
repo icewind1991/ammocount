@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-#tf-demo-parser = { version = "0.4", git = "https://github.com/demostf/parser" }
-tf-demo-parser = { version = "0.4", path = "../demostf/tf-demo-parser" }
+tf-demo-parser = { version = "0.4", git = "https://github.com/demostf/parser" }
+#tf-demo-parser = { version = "0.4", path = "../demostf/tf-demo-parser" }
 fnv = "1"
 main_error = "0.1"
 once_cell = "1"
