@@ -95,7 +95,7 @@ impl MessageHandler for PlayerSearchHandler {
                         self.user = Some(info.player_info.user_id);
                     }
                 } else {
-                    if Some(info.entity_id) == self.entity {
+                    if Some(info.entity_id) == self.entity && self.filter.is_none() {
                         self.user = Some(info.player_info.user_id);
                     }
                 }

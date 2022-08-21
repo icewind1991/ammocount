@@ -83,20 +83,22 @@ fn main() -> Result<(), MainError> {
 
     let pitches: Vec<_> = state
         .iter()
-        .map(|data| {
+        .filter_map(|data| Some((data.tick, data.angles[0]?)))
+        .map(|(tick, pitch)| {
             Key::new(
-                data.tick as f32,
-                Wrapping::<-180, 180>(data.angles[0]),
+                tick as f32,
+                Wrapping::<-180, 180>(pitch),
                 Interpolation::Cosine,
             )
         })
         .collect();
     let yaws: Vec<_> = state
         .iter()
-        .map(|data| {
+        .filter_map(|data| Some((data.tick, data.angles[1]?)))
+        .map(|(tick, yaw)| {
             Key::new(
-                data.tick as f32,
-                Wrapping::<-180, 180>(data.angles[1]),
+                tick as f32,
+                Wrapping::<-180, 180>(yaw),
                 Interpolation::Cosine,
             )
         })
@@ -174,7 +176,7 @@ pub struct TickData {
     max_ammo: u16,
     health: u16,
     uber: Option<u8>,
-    angles: [f32; 2],
+    angles: [Option<f32>; 2],
     hit: Option<u32>,
     weapon: String,
 }
@@ -204,6 +206,8 @@ pub struct AmmoCountAnalyser {
     hit: Option<u32>,
     pov: EntityId,
     model_indexes: HashMap<EntityId, u32>,
+    tick_angles: [Option<f32>; 2],
+    angle_delta_tick: [u32; 2],
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -217,9 +221,6 @@ impl MessageHandler for AmmoCountAnalyser {
         match message {
             Message::ServerInfo(info) => {
                 self.pov = (info.player_slot as u32 + 1).into();
-                if info.player_slot > 0 {
-                    self.local_player_id = self.pov;
-                }
             }
             Message::PacketEntities(entities) => {
                 for entity in &entities.entities {
@@ -274,6 +275,7 @@ impl MessageHandler for AmmoCountAnalyser {
         self.hit = None;
         if self.is_pov() {
             self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
+            self.tick_angles = [Some(self.angles[0]), Some(self.angles[1])];
         }
         self.tick = tick;
     }
@@ -357,7 +359,9 @@ impl AmmoCountAnalyser {
         }
     }
 
-    fn handle_entity(&mut self, _tick: u32, entity: &PacketEntity, state: &ParserState) {
+    fn handle_entity(&mut self, tick: u32, entity: &PacketEntity, state: &ParserState) {
+        let delta = entity.delta.unwrap_or_default();
+        // dbg!(self.local_player_id);
         for prop in entity.props(state) {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
@@ -410,11 +414,25 @@ impl AmmoCountAnalyser {
                     }
                 }
                 SendPropValue::Float(value) => match prop.identifier {
-                    EYE_ANGLES_X if !self.is_pov() => {
-                        self.angles[0] = value;
+                    EYE_ANGLES_X
+                        if !self.is_pov() && entity.entity_index == self.local_player_id =>
+                    {
+                        if delta > self.angle_delta_tick[0] {
+                            self.angles[0] = value;
+                            self.tick_angles[0] = Some(value);
+                            self.angle_delta_tick[0] = tick;
+                        } else {
+                            // dbg!(delta);
+                        }
                     }
-                    EYE_ANGLES_Y if !self.is_pov() => {
-                        self.angles[1] = value;
+                    EYE_ANGLES_Y
+                        if !self.is_pov() && entity.entity_index == self.local_player_id =>
+                    {
+                        if delta > self.angle_delta_tick[1] {
+                            self.angles[1] = value;
+                            self.tick_angles[1] = Some(value);
+                            self.angle_delta_tick[1] = tick;
+                        }
                     }
                     _ => {}
                 },
@@ -450,7 +468,7 @@ impl AmmoCountAnalyser {
                         max_ammo,
                         health: self.current_health,
                         uber: self.has_uber.then(|| self.uber),
-                        angles: self.angles,
+                        angles: self.tick_angles,
                         hit: self.hit,
                         weapon: self
                             .model_names
@@ -458,6 +476,8 @@ impl AmmoCountAnalyser {
                             .cloned()
                             .unwrap_or_default(),
                     });
+
+                    self.tick_angles = [None, None];
                 } else {
                     self.errors.clip_not_found += 1;
                     warn!(
@@ -474,6 +494,8 @@ impl AmmoCountAnalyser {
                     weapon_handle = self.active_weapon,
                     "can't find weapon"
                 );
+            } else {
+                self.errors.no_weapon_set += 1;
             }
             self.last_tick = self.tick;
         }
@@ -504,12 +526,16 @@ impl AmmoCountAnalyser {
 
 #[derive(Default)]
 pub struct Errors {
+    no_weapon_set: u32,
     weapon_not_found: u32,
     clip_not_found: u32,
 }
 
 impl Errors {
     fn show(&self) {
+        if self.no_weapon_set > 0 {
+            eprint!("No weapon set {} times", self.no_weapon_set);
+        }
         if self.weapon_not_found > 0 {
             eprint!("Weapon not found {} times", self.weapon_not_found);
         }
