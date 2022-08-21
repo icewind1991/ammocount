@@ -421,8 +421,6 @@ impl AmmoCountAnalyser {
                             self.angles[0] = value;
                             self.tick_angles[0] = Some(value);
                             self.angle_delta_tick[0] = tick;
-                        } else {
-                            // dbg!(delta);
                         }
                     }
                     EYE_ANGLES_Y

@@ -13,6 +13,8 @@ steamid-ng = "1.0.0"
 tracing-subscriber = "0.3.10"
 tracing = "0.1.32"
 splines = "4.1.0"
+demostf-client = { version = "0.4.3", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1.19.2", features = ["rt", "rt-multi-thread"] }
 
 [profile.dev]
 opt-level = 2
