@@ -10,6 +10,7 @@ use tf_demo_parser::demo::parser::analyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::{Demo, DemoParser, MessageType, ParserState};
 use tokio::runtime::Runtime;
+use tracing::error;
 
 pub fn get_player(demo: &Demo, user: Option<String>) -> (EntityId, UserId) {
     let parser = DemoParser::new_with_analyser(demo.get_stream(), PlayerSearchHandler::new(user));
@@ -144,6 +145,9 @@ fn get_steam_ids(name: &str) -> Vec<User> {
     let rt = Runtime::new().unwrap();
     rt.block_on(async {
         let client = ApiClient::new();
-        client.search_users(name).await.unwrap_or_default()
+        client.search_users(name).await.unwrap_or_else(|e| {
+            error!(error = display(e), "Failed to search users");
+            Vec::new()
+        })
     })
 }
