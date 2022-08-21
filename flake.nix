@@ -1,6 +1,7 @@
 {
   inputs = {
     nixpkgs.url = "nixpkgs/release-22.05";
+    nixpkgs-unstable.url = "nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
@@ -10,10 +11,14 @@
     nixpkgs,
     utils,
     rust-overlay,
+    nixpkgs-unstable,
   }:
     utils.lib.eachDefaultSystem (system: let
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs {
+        inherit system overlays;
+      };
+      pkgs-unstable = import nixpkgs-unstable {
         inherit system overlays;
       };
 
@@ -33,11 +38,30 @@
             targets = [ "x86_64-pc-windows-gnu" ];
           })
           bacon
-          mingw_w64_cc
+          cargo-edit
+          cargo-outdated
+          pkgs-unstable.wine64Packages.staging
+          pkg-config
         ];
-        depsBuildBuild = [ pkgs.wine64 ];
-        # buildInputs = [ windows.pthreads ];
 
+        buildInputs = with pkgs; [openssl];
+        OPENSSL_NO_VENDOR = 1;
+      };
+
+      devShells.windows = pkgs.mkShell {
+        nativeBuildInputs = with pkgs; [
+          (rust-bin.stable.latest.default.override {
+            targets = [ "x86_64-pc-windows-gnu" ];
+          })
+          bacon
+          mingw_w64_cc
+          windows.pthreads
+          pkg-config
+        ];
+        depsBuildBuild = with pkgs; [ pkgs-unstable.wine64Packages.staging ];
+        buildInputs = with pkgs; [windows.pthreads openssl];
+
+        OPENSSL_NO_VENDOR = 1;
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "${mingw_w64_cc.targetPrefix}cc";
         CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER = "wine64";
       };
