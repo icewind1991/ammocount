@@ -32,19 +32,24 @@ fn main() -> Result<(), MainError> {
     let mut args = args();
     tracing_subscriber::fmt::init();
     let bin = args.next().unwrap();
-    let (path, user, start, end) = if let (Some(path), Some(user), Some(start), Some(end)) =
-        (args.next(), args.next(), args.next(), args.next())
-    {
-        (
+    let (path, user, start, end) = match (args.next(), args.next(), args.next(), args.next()) {
+        (Some(path), Some(user), Some(start), Some(end)) => (
             path,
             user,
             start.parse().expect("invalid start tick"),
             end.parse().expect("invalid end tick"),
-        )
-    } else {
-        println!("usage: {} <demo> <steam id> <start tick> <end tick>", bin);
-        return Ok(());
+        ),
+        (Some(path), _, _, _) => {
+            let (user, start, end) = args_from_name(&path);
+            println!("Using {} with ticks {} to {}", user, start, end);
+            (path, user, start, end)
+        }
+        _ => {
+            println!("usage: {} <demo> [steam id] [start tick] [end tick]", bin);
+            return Ok(());
+        }
     };
+
     let file = fs::read(&path)?;
     let demo = Demo::new(&file);
     let (local_player_id, local_user_id) = get_player(&demo, Some(user));
@@ -541,4 +546,18 @@ impl Errors {
             eprint!("Clip not found {} times", self.clip_not_found);
         }
     }
+}
+
+fn args_from_name(name: &str) -> (String, u32, u32) {
+    let name = name.rsplit_once('/').unwrap_or(("", name)).1;
+    let name = name.split_once('.').unwrap_or((name, "")).0;
+    let mut parts = name.split('_');
+    let name = parts.next().expect("unexpected name format").to_lowercase();
+    let tick = parts
+        .next()
+        .expect("unexpected name format")
+        .to_lowercase()
+        .parse()
+        .expect("unexpected name format");
+    (name, tick, tick + 5000)
 }
