@@ -209,6 +209,7 @@ pub struct AmmoCountAnalyser {
     model_indexes: HashMap<EntityId, u32>,
     tick_angles: [Option<f32>; 2],
     angle_delta_tick: [u32; 2],
+    loadout: [i64; 2],
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -404,6 +405,18 @@ impl AmmoCountAnalyser {
                         }
                         MODEL_INDEX => {
                             self.model_indexes.insert(entity.entity_index, value as u32);
+                        }
+                        WEAPON1_ID_PROP if entity.entity_index == self.local_player_id => {
+                            if value != self.loadout[0] {
+                                self.max_ammo[0] = 0;
+                                self.loadout[0] = value;
+                            }
+                        }
+                        WEAPON2_ID_PROP if entity.entity_index == self.local_player_id => {
+                            if value != self.loadout[1] {
+                                self.max_ammo[1] = 0;
+                                self.loadout[1] = value;
+                            }
                         }
                         _ => {}
                     }
