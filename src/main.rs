@@ -450,17 +450,22 @@ impl AmmoCountAnalyser {
             .insert(entity.entity_index, entity.server_class);
 
         if self.tick > self.last_tick {
+            let active_slot = if self.active_weapon == self.loadout[0] {
+                0
+            } else {
+                1
+            };
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
                 if self.clip.contains_key(active_weapon) {
                     let ammo = if self.max_clip[active_weapon] > 0 {
                         self.clip[active_weapon].saturating_sub(1)
                     } else {
-                        self.ammo[0]
+                        self.ammo[active_slot]
                     };
                     let max_ammo = if self.max_clip[active_weapon] > 0 {
                         self.max_clip[active_weapon].saturating_sub(1)
                     } else {
-                        self.max_ammo[0]
+                        self.max_ammo[active_slot]
                     };
 
                     let model_index = self
