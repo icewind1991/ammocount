@@ -80,12 +80,13 @@ impl MessageHandler for PlayerSearchHandler {
     fn handle_string_entry(
         &mut self,
         table: &str,
-        _index: usize,
+        index: usize,
         entry: &StringTableEntry,
         _parser_state: &ParserState,
     ) {
         if table == "userinfo" {
             if let Ok(Some(info)) = UserInfo::parse_from_string_table(
+                index as u16,
                 entry.text.as_deref(),
                 entry.extra_data.as_ref().map(|data| data.data.clone()),
             ) {

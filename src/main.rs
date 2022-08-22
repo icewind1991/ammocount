@@ -7,12 +7,9 @@ use fnv::FnvHashMap;
 use main_error::MainError;
 use splines::{Interpolation, Key, Spline};
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::env::args;
 use std::fs;
 use std::io::Write;
-use steamid_ng::SteamID;
-use tf_demo_parser::demo::data::UserInfo;
 use tf_demo_parser::demo::gameevent_gen::GameEvent;
 use tf_demo_parser::demo::message::packetentities::{EntityId, PacketEntity};
 use tf_demo_parser::demo::message::Message;
@@ -24,8 +21,8 @@ use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropValue};
+use tf_demo_parser::DemoParser;
 use tf_demo_parser::{Demo, MessageType, ParserState};
-use tf_demo_parser::{DemoParser, ReadResult, Stream};
 use tracing::warn;
 
 fn main() -> Result<(), MainError> {
@@ -201,7 +198,6 @@ pub struct AmmoCountAnalyser {
     model_names: Vec<String>,
     active_weapon: i64,
     last_tick: u32,
-    target_user_name: String,
     ammo: [u16; 2],
     max_ammo: [u16; 2],
     uber: u8,
@@ -247,12 +243,6 @@ impl MessageHandler for AmmoCountAnalyser {
         _state: &ParserState,
     ) {
         match table {
-            "userinfo" => {
-                let _ = self.parse_user_info(
-                    entry.text.as_ref().map(|s| s.as_ref()),
-                    entry.extra_data.as_ref().map(|data| data.data.clone()),
-                );
-            }
             "modelprecache" => {
                 let model = entry.text.as_deref().unwrap_or_default();
                 let file_name = model.rsplit_once('/').unwrap_or_default().1;
@@ -502,28 +492,6 @@ impl AmmoCountAnalyser {
             }
             self.last_tick = self.tick;
         }
-    }
-
-    fn parse_user_info(&mut self, text: Option<&str>, data: Option<Stream>) -> ReadResult<()> {
-        if let Some(user_info) = UserInfo::parse_from_string_table(text, data)? {
-            let user_steam_id = SteamID::try_from(user_info.player_info.steam_id.as_str()).ok();
-            if user_info
-                .player_info
-                .name
-                .to_ascii_lowercase()
-                .contains(&self.target_user_name)
-                || (user_steam_id.is_some()
-                    && SteamID::try_from(self.target_user_name.as_str()).ok() == user_steam_id)
-            {
-                if self.pov == 1 {
-                    // only allow setting players for stv demos
-                    self.local_player_id = user_info.entity_id;
-                    self.local_user_id = user_info.player_info.user_id;
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
