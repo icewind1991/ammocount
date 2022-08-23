@@ -357,7 +357,6 @@ impl AmmoCountAnalyser {
 
     fn handle_entity(&mut self, tick: u32, entity: &PacketEntity, state: &ParserState) {
         let delta = entity.delta.unwrap_or_default();
-        // dbg!(self.local_player_id);
         for prop in entity.props(state) {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
@@ -409,12 +408,14 @@ impl AmmoCountAnalyser {
                         WEAPON1_ID_PROP if entity.entity_index == self.local_player_id => {
                             if value != self.loadout[0] {
                                 self.max_ammo[0] = 0;
+                                self.ammo[0] = 0;
                                 self.loadout[0] = value;
                             }
                         }
                         WEAPON2_ID_PROP if entity.entity_index == self.local_player_id => {
                             if value != self.loadout[1] {
                                 self.max_ammo[1] = 0;
+                                self.ammo[1] = 0;
                                 self.loadout[1] = value;
                             }
                         }
@@ -457,12 +458,12 @@ impl AmmoCountAnalyser {
             };
             if let Some(active_weapon) = self.outer_map.get(&self.active_weapon) {
                 if self.clip.contains_key(active_weapon) {
-                    let ammo = if self.max_clip[active_weapon] > 0 {
+                    let mut ammo = if self.max_clip[active_weapon] > 0 {
                         self.clip[active_weapon].saturating_sub(1)
                     } else {
                         self.ammo[active_slot]
                     };
-                    let max_ammo = if self.max_clip[active_weapon] > 0 {
+                    let mut max_ammo = if self.max_clip[active_weapon] > 0 {
                         self.max_clip[active_weapon].saturating_sub(1)
                     } else {
                         self.max_ammo[active_slot]
@@ -473,6 +474,18 @@ impl AmmoCountAnalyser {
                         .get(active_weapon)
                         .copied()
                         .unwrap_or_default();
+
+                    let weapon = self
+                        .model_names
+                        .get(model_index as usize)
+                        .cloned()
+                        .unwrap_or_default();
+
+                    if let Some(max_overwrite) = max_clip_overwrite(&weapon) {
+                        max_ammo = max_overwrite;
+                    }
+                    ammo = ammo.min(max_ammo);
+
                     self.output.push(TickData {
                         tick: self.tick,
                         ammo,
@@ -481,11 +494,7 @@ impl AmmoCountAnalyser {
                         uber: self.has_uber.then(|| self.uber),
                         angles: self.tick_angles,
                         hit: self.hit,
-                        weapon: self
-                            .model_names
-                            .get(model_index as usize)
-                            .cloned()
-                            .unwrap_or_default(),
+                        weapon,
                     });
 
                     self.tick_angles = [None, None];
@@ -546,4 +555,11 @@ fn args_from_name(name: &str) -> (String, u32, u32) {
         .parse()
         .expect("unexpected name format");
     (name, tick, tick + 5000)
+}
+
+fn max_clip_overwrite(weapon: &str) -> Option<u16> {
+    match weapon {
+        "c_pep_pistol" => Some(9),
+        _ => None,
+    }
 }
