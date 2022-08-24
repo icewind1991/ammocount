@@ -416,7 +416,7 @@ impl AmmoCountAnalyser {
                 }
             }
             GameEvent::PlayerHurt(event) => {
-                if UserId::from(event.user_id) == self.local_user_id {
+                if UserId::from(event.attacker) == self.local_user_id {
                     self.hit = Some(event.damage_amount as u32);
                 }
             }
