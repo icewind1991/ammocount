@@ -5,6 +5,7 @@ use crate::playersearch::get_player;
 use crate::wrapping::Wrapping;
 use fnv::FnvHashMap;
 use main_error::MainError;
+use serde::Serialize;
 use splines::{Interpolation, Key, Spline};
 use std::collections::HashMap;
 use std::env::args;
@@ -21,6 +22,7 @@ use tf_demo_parser::demo::packet::stringtable::StringTableEntry;
 use tf_demo_parser::demo::parser::gamestateanalyser::UserId;
 use tf_demo_parser::demo::parser::MessageHandler;
 use tf_demo_parser::demo::sendprop::{SendPropIdentifier, SendPropValue};
+use tf_demo_parser::demo::vector::Vector;
 use tf_demo_parser::DemoParser;
 use tf_demo_parser::{Demo, MessageType, ParserState};
 use tracing::warn;
@@ -63,12 +65,14 @@ fn main() -> Result<(), MainError> {
     let yaw_path = format!("{}_yaw.txt", path);
     let hit_path = format!("{}_hit.txt", path);
     let weapon_path = format!("{}_weapon.txt", path);
+    let camera_path = format!("{}_camera.txt", path);
     let mut ammo_out = fs::File::create(ammo_path)?;
     let mut health_out = fs::File::create(health_path)?;
     let mut pitch_out = fs::File::create(pitch_path)?;
     let mut yaw_out = fs::File::create(yaw_path)?;
     let mut hit_out = fs::File::create(hit_path)?;
     let mut weapon_out = fs::File::create(weapon_path)?;
+    let mut camera_out = fs::File::create(camera_path)?;
     let mut uber_out = None;
     writeln!(&mut ammo_out, "txt = []")?;
     writeln!(&mut health_out, "txt = []")?;
@@ -76,6 +80,7 @@ fn main() -> Result<(), MainError> {
     writeln!(&mut yaw_out, "txt = []")?;
     writeln!(&mut hit_out, "txt = []")?;
     writeln!(&mut weapon_out, "txt = []")?;
+    writeln!(&mut camera_out, "txt = []")?;
     let mut last_frame = 0;
     let mut last_angles: Option<[f32; 2]> = None;
 
@@ -105,10 +110,40 @@ fn main() -> Result<(), MainError> {
             )
         })
         .collect();
+    let x_s: Vec<_> = state
+        .iter()
+        .map(|data| (data.tick, data.position.x))
+        .map(|(tick, x)| Key::new(tick as f32, x, Interpolation::Linear))
+        .collect();
+    let y_s: Vec<_> = state
+        .iter()
+        .map(|data| (data.tick, data.position.y))
+        .map(|(tick, y)| Key::new(tick as f32, y, Interpolation::Linear))
+        .collect();
+    let z_s: Vec<_> = state
+        .iter()
+        .map(|data| (data.tick, data.position.z))
+        .map(|(tick, z)| Key::new(tick as f32, z, Interpolation::Linear))
+        .collect();
+
     let pitches = Spline::from_vec(pitches);
     let yaws = Spline::from_vec(yaws);
 
+    let x_s = Spline::from_vec(x_s);
+    let y_s = Spline::from_vec(y_s);
+    let z_s = Spline::from_vec(z_s);
+
     let mut ticks_done = 0;
+
+    let start_position = Vector {
+        x: x_s.clamped_sample(start as f32).unwrap(),
+        y: y_s.clamped_sample(start as f32).unwrap(),
+        z: z_s.clamped_sample(start as f32).unwrap(),
+    };
+    let start_angles = [
+        pitches.clamped_sample(start as f32).unwrap().0,
+        yaws.clamped_sample(start as f32).unwrap().0,
+    ];
 
     for data in state
         .into_iter()
@@ -131,6 +166,11 @@ fn main() -> Result<(), MainError> {
                 pitches.clamped_sample(tick as f32).unwrap().0,
                 yaws.clamped_sample(tick as f32).unwrap().0,
             ];
+            let position = Vector {
+                x: x_s.clamped_sample(tick as f32).unwrap(),
+                y: y_s.clamped_sample(tick as f32).unwrap(),
+                z: z_s.clamped_sample(tick as f32).unwrap(),
+            };
             let mut delta_angles = match last_angles {
                 Some(last_angles) => [angles[0] - last_angles[0], angles[1] - last_angles[1]],
                 None => [0.0, 0.0],
@@ -161,6 +201,23 @@ fn main() -> Result<(), MainError> {
             writeln!(&mut yaw_out, r#"txt[{}] = {};"#, frame, delta_angles[1])?;
             writeln!(&mut hit_out, r#"txt[{}] = {};"#, frame, hit_number as u32)?;
             writeln!(&mut weapon_out, r#"txt[{}] = "{}";"#, frame, data.weapon)?;
+
+            #[derive(Serialize)]
+            struct CameraOut {
+                position: Vector,
+                angle: [f32; 2],
+            }
+
+            writeln!(
+                &mut camera_out,
+                r#"txt[{}] = {};"#,
+                frame,
+                serde_json::to_string(&CameraOut {
+                    position: position - start_position,
+                    angle: [angles[0] - start_angles[0], angles[1] - start_angles[1],]
+                })
+                .unwrap()
+            )?;
             ticks_done += 1;
             last_angles = Some(angles);
         }
@@ -181,6 +238,7 @@ pub struct TickData {
     angles: [Option<f32>; 2],
     hit: Option<u32>,
     weapon: String,
+    position: Vector,
 }
 
 #[derive(Default)]
@@ -210,6 +268,7 @@ pub struct AmmoCountAnalyser {
     tick_angles: [Option<f32>; 2],
     angle_delta_tick: [u32; 2],
     loadout: [i64; 2],
+    position: Vector,
 }
 
 impl MessageHandler for AmmoCountAnalyser {
@@ -271,6 +330,7 @@ impl MessageHandler for AmmoCountAnalyser {
         self.hit = None;
         if self.is_pov() {
             self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
+            self.position = meta.view_angles[0].origin;
             self.tick_angles = [Some(self.angles[0]), Some(self.angles[1])];
         }
         self.tick = tick;
@@ -302,6 +362,15 @@ const EYE_ANGLES_X: SendPropIdentifier =
 #[allow(dead_code)]
 const EYE_ANGLES_Y: SendPropIdentifier =
     SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_angEyeAngles[1]");
+#[allow(dead_code)]
+const EYE_POS_X: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin[0]");
+#[allow(dead_code)]
+const EYE_POS_Y: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin[1]");
+#[allow(dead_code)]
+const EYE_POS_Z: SendPropIdentifier =
+    SendPropIdentifier::new("DT_TFNonLocalPlayerExclusive", "m_vecOrigin[2]");
 
 #[allow(dead_code)]
 const WEAPON1_ID_PROP: SendPropIdentifier = SendPropIdentifier::new("m_hMyWeapons", "000");
@@ -356,7 +425,6 @@ impl AmmoCountAnalyser {
     }
 
     fn handle_entity(&mut self, tick: u32, entity: &PacketEntity, state: &ParserState) {
-        let delta = entity.delta.unwrap_or_default();
         for prop in entity.props(state) {
             match prop.value {
                 SendPropValue::Integer(value) if value != OUTER_NULL => {
@@ -422,27 +490,32 @@ impl AmmoCountAnalyser {
                         _ => {}
                     }
                 }
-                SendPropValue::Float(value) => match prop.identifier {
-                    EYE_ANGLES_X
-                        if !self.is_pov() && entity.entity_index == self.local_player_id =>
-                    {
-                        if delta > self.angle_delta_tick[0] {
+                SendPropValue::Float(value)
+                    if !self.is_pov() && entity.entity_index == self.local_player_id =>
+                {
+                    match prop.identifier {
+                        EYE_ANGLES_X => {
                             self.angles[0] = value;
                             self.tick_angles[0] = Some(value);
                             self.angle_delta_tick[0] = tick;
                         }
-                    }
-                    EYE_ANGLES_Y
-                        if !self.is_pov() && entity.entity_index == self.local_player_id =>
-                    {
-                        if delta > self.angle_delta_tick[1] {
+                        EYE_ANGLES_Y => {
                             self.angles[1] = value;
                             self.tick_angles[1] = Some(value);
                             self.angle_delta_tick[1] = tick;
                         }
+                        EYE_POS_X => {
+                            self.position.x = value;
+                        }
+                        EYE_POS_Y => {
+                            self.position.y = value;
+                        }
+                        EYE_POS_Z => {
+                            self.position.z = value;
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         }
@@ -495,6 +568,7 @@ impl AmmoCountAnalyser {
                         angles: self.tick_angles,
                         hit: self.hit,
                         weapon,
+                        position: self.position,
                     });
 
                     self.tick_angles = [None, None];

@@ -19,6 +19,8 @@ dependencies = [
  "fnv",
  "main_error",
  "once_cell",
+ "serde",
+ "serde_json",
  "splines",
  "steamid-ng",
  "tf-demo-parser",
@@ -1003,7 +1005,7 @@ dependencies = [
 [[package]]
 name = "tf-demo-parser"
 version = "0.4.0"
-source = "git+https://github.com/demostf/parser#c3ea161928cbfe02da180be38aa8da121e2b33ac"
+source = "git+https://github.com/demostf/parser#74ab5072d2243be371dfe218a8bcb1529a55ab31"
 dependencies = [
  "bitbuffer",
  "enumflags2",
