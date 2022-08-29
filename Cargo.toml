@@ -17,6 +17,7 @@ demostf-client = { version = "0.4.3", default-features = false, features = ["rus
 tokio = { version = "1.19.2", features = ["rt", "rt-multi-thread"] }
 serde = { version = "1.0.139", features = ["derive"] }
 serde_json = "1.0.82"
+cgmath = "0.18.0"
 
 [profile.dev]
 opt-level = 2

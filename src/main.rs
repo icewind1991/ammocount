@@ -3,6 +3,7 @@ mod wrapping;
 
 use crate::playersearch::get_player;
 use crate::wrapping::Wrapping;
+use cgmath::{Deg, Euler, Matrix3, Quaternion};
 use fnv::FnvHashMap;
 use main_error::MainError;
 use serde::Serialize;
@@ -190,7 +191,6 @@ fn main() -> Result<(), MainError> {
                 });
                 writeln!(uber_out, "txt[{}] = \"{}\";", frame, uber)?;
             }
-            // println!("txt[{}] = \"{}/{}\";", frame, data.ammo, data.max_ammo);
             writeln!(
                 &mut ammo_out,
                 "txt[{}] = \"{}/{}\";",
@@ -205,16 +205,25 @@ fn main() -> Result<(), MainError> {
             #[derive(Serialize)]
             struct CameraOut {
                 position: Vector,
-                angle: [f32; 2],
+                angle: [f32; 3],
             }
 
+            let yaw_matrix = <Matrix3<f32>>::from_angle_y(degrees(-(angles[1] - start_angles[1])));
+            let pitch_matrix =
+                <Matrix3<f32>>::from_angle_x(degrees(-(angles[0] - start_angles[0])));
+            let quat = <Quaternion<f32>>::from(yaw_matrix * pitch_matrix);
+            let euler = Euler::from(quat);
             writeln!(
                 &mut camera_out,
                 r#"txt[{}] = {};"#,
                 frame,
                 serde_json::to_string(&CameraOut {
                     position: position - start_position,
-                    angle: [angles[0] - start_angles[0], angles[1] - start_angles[1],]
+                    angle: [
+                        Deg::from(euler.x).0,
+                        Deg::from(euler.y).0,
+                        Deg::from(euler.z).0
+                    ]
                 })
                 .unwrap()
             )?;
@@ -636,4 +645,8 @@ fn max_clip_overwrite(weapon: &str) -> Option<u16> {
         "c_pep_pistol" => Some(9),
         _ => None,
     }
+}
+
+pub const fn degrees(v: f32) -> Deg<f32> {
+    Deg(v)
 }
