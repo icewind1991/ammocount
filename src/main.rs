@@ -336,7 +336,6 @@ impl MessageHandler for AmmoCountAnalyser {
     }
 
     fn handle_packet_meta(&mut self, tick: u32, meta: &MessagePacketMeta, _state: &ParserState) {
-        self.hit = None;
         if self.is_pov() {
             self.angles = [meta.view_angles[0].angles.x, meta.view_angles[0].angles.y];
             self.position = meta.view_angles[0].origin;
@@ -580,6 +579,7 @@ impl AmmoCountAnalyser {
                         position: self.position,
                     });
 
+                    self.hit = None;
                     self.tick_angles = [None, None];
                 } else {
                     self.errors.clip_not_found += 1;
